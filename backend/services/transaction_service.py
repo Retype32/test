@@ -1,0 +1,148 @@
+import uuid
+from decimal import Decimal
+from datetime import datetime, date
+from typing import Optional
+from sqlalchemy.ext.asyncio import AsyncSession
+from ..repositories.transaction_repository import TransactionRepository, AuditRepository
+from ..repositories.customer_repository import CustomerRepository
+from ..services.eod_service import EODService
+from ..services.notification_service import NotificationService
+from ..services.duplicate_detection_service import DuplicateDetectionService
+from ..models.transaction import Transaction, BalanceStatus
+from ..models.notification import NotificationEventType, NotificationSeverity
+from ..schemas.transaction import TransactionCreate
+
+
+DENOMINATION_VALUES = {
+    "€500": Decimal("500"),
+    "€200": Decimal("200"),
+    "€100": Decimal("100"),
+    "€50": Decimal("50"),
+    "€20": Decimal("20"),
+    "€10": Decimal("10"),
+    "€5": Decimal("5"),
+    "Coins": Decimal("1"),
+}
+
+
+class TransactionService:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+        self.repo = TransactionRepository(db)
+        self.customer_repo = CustomerRepository(db)
+        self.audit_repo = AuditRepository(db)
+        self.eod_service = EODService(db)
+        self.notification_service = NotificationService(db)
+        self.duplicate_service = DuplicateDetectionService(db)
+
+    def calculate_balance_status(self, denominations: list[dict], declared_total: Decimal) -> BalanceStatus:
+        computed = sum(
+            Decimal(str(d["count"])) * DENOMINATION_VALUES.get(d["denomination"], Decimal("0"))
+            for d in denominations
+        )
+        return BalanceStatus.balanced if computed == declared_total else BalanceStatus.not_balanced
+
+    async def create_transaction(self, user_id: uuid.UUID, username: str, data: TransactionCreate) -> Transaction:
+        today = datetime.now().date()
+        if await self.eod_service.is_day_closed(today):
+            raise ValueError(f"Business day {today} is closed for this catalog")
+
+        customer = await self.customer_repo.get_by_id(data.customer_id)
+        if not customer:
+            raise ValueError(f"Customer {data.customer_id} not found")
+
+        location = await self.customer_repo.get_location(data.location_id)
+        if not location:
+            raise ValueError(f"Location {data.location_id} not found")
+        if location.customer_id != data.customer_id:
+            raise ValueError("Location does not belong to this customer")
+
+        denom_list = [
+            {"denomination": d.denomination, "count": d.count, "value": d.value}
+            for d in data.denominations
+        ]
+        balance_status = self.calculate_balance_status(denom_list, data.total_value)
+
+        txn = await self.repo.create(
+            user_id=user_id,
+            username=username,
+            customer_id=data.customer_id,
+            location_id=data.location_id,
+            bag_number=data.bag_number,
+            total_value=data.total_value,
+            expected_total=data.expected_total,
+            balance_status=balance_status,
+            denominations=denom_list,
+        )
+
+        await self.audit_repo.log(
+            user_id, "TRANSACTION_CREATED",
+            f"Transaction {txn.transaction_id} created for customer {data.customer_id}, bag {data.bag_number}"
+        )
+
+        # Reload with denominations eagerly loaded (required for the duplicate
+        # comparison in an async session — the collection isn't populated by
+        # the plain inserts above) and to check for duplicates.
+        txn = await self.repo.get_by_id(txn.transaction_id)
+        await self.duplicate_service.check_for_duplicate(txn)
+        return txn
+
+    async def get_transaction(self, transaction_id: uuid.UUID) -> Optional[Transaction]:
+        return await self.repo.get_by_id(transaction_id)
+
+    async def list_transactions(
+        self,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+        customer_id: Optional[str] = None,
+        location_id: Optional[str] = None,
+        user_id: Optional[uuid.UUID] = None,
+        business_date: Optional[date] = None,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> list[Transaction]:
+        return await self.repo.list_filtered(
+            date_from=date_from,
+            date_to=date_to,
+            customer_id=customer_id,
+            location_id=location_id,
+            user_id=user_id,
+            business_date=business_date,
+            limit=limit,
+            offset=offset,
+        )
+
+    async def transfer_business_date(
+        self,
+        transaction_id: uuid.UUID,
+        new_business_date: date,
+        reason: str,
+        admin_user_id: uuid.UUID,
+    ) -> Transaction:
+        txn = await self.repo.get_by_id(transaction_id)
+        if not txn:
+            raise ValueError(f"Transaction {transaction_id} not found")
+
+        if await self.eod_service.is_day_closed(new_business_date):
+            raise ValueError(f"Cannot transfer into {new_business_date}: that business day is closed")
+
+        old_business_date = txn.business_date
+        updated = await self.repo.update_business_date(transaction_id, new_business_date)
+
+        await self.audit_repo.log(
+            admin_user_id,
+            "TRANSACTION_DAY_TRANSFERRED",
+            f"Transaction {transaction_id} moved from {old_business_date} to {new_business_date}. Reason: {reason}",
+        )
+        await self.notification_service.raise_event(
+            event_type=NotificationEventType.transaction_transferred.value,
+            severity=NotificationSeverity.warning.value,
+            message=(
+                f"Transaction for bag '{updated.bag_number}' moved from {old_business_date} "
+                f"to {new_business_date} by an administrator"
+            ),
+            related_transaction_id=transaction_id,
+            related_user_id=admin_user_id,
+            details={"from": str(old_business_date), "to": str(new_business_date), "reason": reason},
+        )
+        return updated
