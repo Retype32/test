@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from ...services.customer_service import CustomerService
-from ...schemas.customer import CustomerWithLocations, LocationResponse, CustomerResponse
+from ...schemas.customer import CustomerWithLocations, LocationResponse
 from ..deps import CurrentUser, CatalogDB
 
 router = APIRouter(prefix="/customers", tags=["customers"])
@@ -33,11 +33,11 @@ async def get_location(
     return LocationResponse.model_validate(location)
 
 
-@router.get("/", response_model=list[CustomerResponse])
+@router.get("/", response_model=list[CustomerWithLocations])
 async def list_customers(
     db: CatalogDB,
     _: CurrentUser,
 ):
     service = CustomerService(db)
     customers = await service.list_customers()
-    return [CustomerResponse.model_validate(c) for c in customers]
+    return [CustomerWithLocations.model_validate(c) for c in customers]

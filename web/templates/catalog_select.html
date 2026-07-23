@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Select Catalog — Brink's Nexus</title>
+    <link rel="stylesheet" href="/web/static/css/theme.css">
+</head>
+<body>
+<div class="centered-page">
+    <div class="auth-card" style="width:460px;">
+        <div class="auth-header">
+            <div class="name">SELECT PROCESSING CATALOG</div>
+            <div class="tagline">Choose which FI you're processing for, {{ user.username }}</div>
+        </div>
+        <div class="auth-body">
+            {% for c in catalogs %}
+            <form method="post" action="/web/catalog/select">
+                <input type="hidden" name="code" value="{{ c.code }}">
+                <button type="submit" class="catalog-option">{{ c.display_name }}</button>
+            </form>
+            {% endfor %}
+            <p class="text-muted" style="text-align:center; margin-top:10px;">
+                You can switch catalogs any time from the sidebar.
+            </p>
+        </div>
+    </div>
+</div>
+</body>
+</html>

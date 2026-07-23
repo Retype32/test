@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Duplicates — Brink's Nexus{% endblock %}
+{% block page_title %}Possible Duplicates{% endblock %}
+{% block page_subtitle %}Supervisor &#9656; Duplicates{% endblock %}
+{% block content %}
+
+<div class="card">
+    <div class="card-header">{{ rows|length }} PENDING REVIEW</div>
+    <div class="card-body" style="padding:0;">
+        <table class="data">
+            <thead>
+            <tr>
+                <th>Detected</th>
+                <th>Processor</th>
+                <th>Bag Number</th>
+                <th>This Transaction</th>
+                <th>Duplicate Of</th>
+                <th>Matched Fields</th>
+                <th></th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for row in rows %}
+            <tr>
+                <td>{{ row.flag.detected_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+                <td>{{ row.txn.username if row.txn else "—" }}</td>
+                <td>{{ row.txn.bag_number if row.txn else "—" }}</td>
+                <td><a href="/web/transactions/{{ row.flag.transaction_id }}">{{ row.flag.transaction_id|string|truncate(8, True, "") }}</a></td>
+                <td><a href="/web/transactions/{{ row.flag.duplicate_of_transaction_id }}">{{ row.flag.duplicate_of_transaction_id|string|truncate(8, True, "") }}</a></td>
+                <td>{{ row.matched_fields }}</td>
+                <td>
+                    <form method="post" action="/web/duplicates/{{ row.flag.id }}/review" style="display:flex; gap:6px;">
+                        <input type="hidden" name="status" value="confirmed">
+                        <button class="btn btn-sm btn-danger" type="submit">Confirm</button>
+                    </form>
+                    <form method="post" action="/web/duplicates/{{ row.flag.id }}/review" style="display:flex; gap:6px; margin-top:4px;">
+                        <input type="hidden" name="status" value="dismissed">
+                        <button class="btn btn-sm" type="submit">Dismiss</button>
+                    </form>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="text-muted" style="text-align:center; padding:20px;">No pending duplicates.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}

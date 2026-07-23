@@ -12,6 +12,11 @@ httpx==0.27.2
 python-dotenv==1.2.2
 alembic==1.18.5
 
+# Web portal
+jinja2==3.1.6
+itsdangerous==2.2.0
+python-multipart==0.0.32
+
 # Frontend
 PySide6==6.7.3
 

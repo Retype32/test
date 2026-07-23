@@ -77,6 +77,9 @@ class ApiClient:
     def validate_customer(self, customer_id: str) -> ApiResponse:
         return self._request("GET", f"/customers/{customer_id}")
 
+    def list_customers(self) -> ApiResponse:
+        return self._request("GET", "/customers/")
+
     def create_transaction(self, payload: dict) -> ApiResponse:
         return self._request("POST", "/transactions/", json=payload)
 

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Statistics — Brink's Nexus{% endblock %}
+{% block page_title %}Processor Statistics{% endblock %}
+{% block page_subtitle %}Supervisor &#9656; Statistics{% endblock %}
+{% block content %}
+
+<div class="card">
+    <div class="card-header">DATE RANGE</div>
+    <div class="card-body">
+        <form method="get" action="/web/stats">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>From</label>
+                    <input type="date" name="date_from" value="{{ filters.date_from }}">
+                </div>
+                <div class="form-group">
+                    <label>To</label>
+                    <input type="date" name="date_to" value="{{ filters.date_to }}">
+                </div>
+                <div class="form-group">
+                    <button class="btn btn-primary" type="submit">SEARCH</button>
+                </div>
+                <div class="form-group" style="margin-left:auto;">
+                    <span class="text-muted">Target: 23 slips/hour</span>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">{{ rows|length }} PROCESSORS</div>
+    <div class="card-body" style="padding:0;">
+        <table class="data">
+            <thead>
+            <tr>
+                <th>Processor</th>
+                <th class="num">Slips</th>
+                <th class="num">Slips / Hour</th>
+                <th class="num">Cash Volume</th>
+                <th class="num">Duplicate Errors</th>
+                <th class="num">Transfer Errors</th>
+                <th class="num">Total Errors</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for r in rows %}
+            <tr>
+                <td>{{ r.username }}</td>
+                <td class="num">{{ r.slip_count }}</td>
+                <td class="num" style="color: {% if r.slips_per_hour >= r.target_per_hour %}var(--success){% else %}var(--warning){% endif %}; font-weight:700;">
+                    {{ "%.2f"|format(r.slips_per_hour) }}
+                </td>
+                <td class="num">&euro;{{ "%.2f"|format(r.cash_volume) }}</td>
+                <td class="num" style="{% if r.duplicate_error_count > 0 %}color: var(--error); font-weight:700;{% endif %}">{{ r.duplicate_error_count }}</td>
+                <td class="num" style="{% if r.transfer_error_count > 0 %}color: var(--warning);{% endif %}">{{ r.transfer_error_count }}</td>
+                <td class="num">{{ r.error_count }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="text-muted" style="text-align:center; padding:20px;">No activity in this date range.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}

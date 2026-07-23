@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>{% block title %}Brink's Nexus{% endblock %}</title>
+    <link rel="stylesheet" href="/web/static/css/theme.css">
+</head>
+<body>
+<div class="app-shell">
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="name">BRINK'S NEXUS</div>
+            <div class="tagline">Cash Operations Platform</div>
+        </div>
+        <div class="identity">
+            {{ user.username }} &middot; {{ user.role.value.upper() }}
+            {% if catalog_name %}&middot; {{ catalog_name }}{% endif %}
+        </div>
+        <nav>
+            <a class="nav-link" href="/web/catalog">&#8644; Switch Catalog</a>
+            {% if catalog_name %}
+            <a class="nav-link badge-link" href="/web/notifications">&#128276; Notifications{% if notification_count %} ({{ notification_count }}){% endif %}</a>
+            <div class="section-label">Supervisor</div>
+            <a class="nav-link {% if active_nav == 'dashboard' %}active{% endif %}" href="/web/dashboard">Dashboard</a>
+            <a class="nav-link {% if active_nav == 'transactions' %}active{% endif %}" href="/web/transactions">Transaction Viewer</a>
+            <a class="nav-link {% if active_nav == 'reports' %}active{% endif %}" href="/web/reports">Reports</a>
+            <a class="nav-link {% if active_nav == 'stats' %}active{% endif %}" href="/web/stats">Statistics</a>
+            <a class="nav-link {% if active_nav == 'eod' %}active{% endif %}" href="/web/eod">End of Day</a>
+            <a class="nav-link {% if active_nav == 'duplicates' %}active{% endif %}" href="/web/duplicates">Duplicates</a>
+            {% if user.role.value == "administrator" %}
+            <div class="section-label">Admin</div>
+            <a class="nav-link {% if active_nav == 'admin_users' %}active{% endif %}" href="/web/admin/users">Staff</a>
+            {% endif %}
+            {% endif %}
+        </nav>
+        <div class="logout">
+            <a href="/web/logout">&#9211; Sign Out</a>
+        </div>
+    </aside>
+    <div class="main">
+        <div class="page-header">
+            <h1>{% block page_title %}{% endblock %}</h1>
+            <div class="subtitle">{% block page_subtitle %}{% endblock %}</div>
+        </div>
+        <div class="content">
+            {% if error_message %}<div class="alert alert-error">{{ error_message }}</div>{% endif %}
+            {% if success_message %}<div class="alert alert-success">{{ success_message }}</div>{% endif %}
+            {% block content %}{% endblock %}
+        </div>
+    </div>
+</div>
+</body>
+</html>

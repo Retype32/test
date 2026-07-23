@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Notifications — Brink's Nexus{% endblock %}
+{% block page_title %}Notifications{% endblock %}
+{% block page_subtitle %}Supervisor &#9656; Notifications{% endblock %}
+{% block content %}
+
+<div class="card">
+    <div class="card-header">{{ notifications|length }} OPEN</div>
+    <div class="card-body" style="padding:0;">
+        <table class="data">
+            <thead>
+            <tr><th>When</th><th>Severity</th><th>Message</th><th></th></tr>
+            </thead>
+            <tbody>
+            {% for n in notifications %}
+            <tr>
+                <td>{{ n.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+                <td>
+                    {% if n.severity.value == "error" %}<span class="badge badge-error">ERROR</span>
+                    {% elif n.severity.value == "warning" %}<span class="badge badge-warning">WARNING</span>
+                    {% else %}<span class="badge badge-muted">INFO</span>{% endif %}
+                </td>
+                <td>{{ n.message }}</td>
+                <td>
+                    {% if n.event_type == "DUPLICATE_TRANSACTION" %}
+                    <a class="btn btn-sm" href="/web/duplicates">Review in Duplicates</a>
+                    {% else %}
+                    <form method="post" action="/web/notifications/{{ n.id }}/resolve">
+                        <button class="btn btn-sm" type="submit">Dismiss</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="text-muted" style="text-align:center; padding:20px;">No open notifications.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}

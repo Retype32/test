@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}End of Day — Brink's Nexus{% endblock %}
+{% block page_title %}End of Day{% endblock %}
+{% block page_subtitle %}Supervisor &#9656; End of Day{% endblock %}
+{% block content %}
+
+<div class="card">
+    <div class="card-header">CLOSE A BUSINESS DAY</div>
+    <div class="card-body">
+        <form method="post" action="/web/eod/close">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Business Date</label>
+                    <input type="date" name="business_date" value="{{ today }}" required>
+                </div>
+                <div class="form-group">
+                    <button class="btn btn-danger" type="submit">CLOSE DAY</button>
+                </div>
+            </div>
+        </form>
+        <p class="text-muted">Closing a day locks out <strong>all</strong> processors in this catalog from creating new transactions for that day.</p>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">CLOSURE HISTORY (LAST 60 DAYS)</div>
+    <div class="card-body" style="padding:0;">
+        <table class="data">
+            <thead>
+            <tr>
+                <th>Business Date</th>
+                <th>Status</th>
+                <th>Closed At</th>
+                <th>Reopen Reason</th>
+                {% if is_admin %}<th></th>{% endif %}
+            </tr>
+            </thead>
+            <tbody>
+            {% for c in closures %}
+            <tr>
+                <td>{{ c.business_date }}</td>
+                <td>
+                    {% if c.status.value == "closed" %}
+                    <span class="badge badge-error">CLOSED</span>
+                    {% else %}
+                    <span class="badge badge-success">REOPENED</span>
+                    {% endif %}
+                </td>
+                <td>{{ c.closed_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+                <td>{{ c.reopen_reason or "" }}</td>
+                {% if is_admin %}
+                <td>
+                    {% if c.status.value == "closed" %}
+                    <form method="post" action="/web/eod/reopen" style="display:flex; gap:6px;">
+                        <input type="hidden" name="business_date" value="{{ c.business_date }}">
+                        <input type="text" name="reason" placeholder="Reason" required style="width:160px;">
+                        <button class="btn btn-sm" type="submit">Reopen</button>
+                    </form>
+                    {% endif %}
+                </td>
+                {% endif %}
+            </tr>
+            {% else %}
+            <tr><td colspan="5" class="text-muted" style="text-align:center; padding:20px;">No closures in this window.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}

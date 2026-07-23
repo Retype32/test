@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Brink's Nexus{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+{% block page_subtitle %}Supervisor &#9656; Dashboard &mdash; {{ today }}{% endblock %}
+{% block content %}
+
+<div class="stat-grid">
+    <div class="stat-tile">
+        <div class="label">Business Day</div>
+        <div class="value" style="font-size:18px;">
+            {% if day_closed %}
+            <span class="badge badge-error">CLOSED</span>
+            {% else %}
+            <span class="badge badge-success">OPEN</span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="stat-tile">
+        <div class="label">Slips Today</div>
+        <div class="value">{{ total_slips }}</div>
+    </div>
+    <div class="stat-tile">
+        <div class="label">Cash Volume Today</div>
+        <div class="value">&euro;{{ "%.2f"|format(total_cash) }}</div>
+    </div>
+    <div class="stat-tile">
+        <div class="label">Errors Today</div>
+        <div class="value" style="color: {% if total_errors > 0 %}var(--error){% else %}var(--success){% endif %};">{{ total_errors }}</div>
+    </div>
+    <div class="stat-tile">
+        <div class="label">Active Processors</div>
+        <div class="value">{{ processor_count }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">QUICK LINKS</div>
+    <div class="card-body">
+        <a class="btn" href="/web/transactions">Transaction Viewer</a>
+        <a class="btn" href="/web/reports">Reports</a>
+        <a class="btn" href="/web/stats">Statistics</a>
+        <a class="btn" href="/web/eod">End of Day</a>
+        <a class="btn" href="/web/duplicates">Duplicates</a>
+        <a class="btn" href="/web/notifications">Notifications</a>
+    </div>
+</div>
+
+{% endblock %}

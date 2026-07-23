@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Transaction Viewer — Brink's Nexus{% endblock %}
+{% block page_title %}Transaction Viewer{% endblock %}
+{% block page_subtitle %}Supervisor &#9656; Transaction Viewer{% endblock %}
+{% block content %}
+
+<div class="card">
+    <div class="card-header">FILTERS</div>
+    <div class="card-body">
+        <form method="get" action="/web/transactions">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Date From</label>
+                    <input type="date" name="date_from" value="{{ filters.date_from }}">
+                </div>
+                <div class="form-group">
+                    <label>Date To</label>
+                    <input type="date" name="date_to" value="{{ filters.date_to }}">
+                </div>
+                <div class="form-group">
+                    <label>Customer ID</label>
+                    <input type="text" name="customer_id" value="{{ filters.customer_id }}" placeholder="Leave blank for all">
+                </div>
+                <div class="form-group">
+                    <label>Location ID</label>
+                    <input type="text" name="location_id" value="{{ filters.location_id }}" placeholder="Leave blank for all">
+                </div>
+                <div class="form-group">
+                    <button class="btn btn-primary" type="submit">SEARCH</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">{{ transactions|length }} RECORDS</div>
+    <div class="card-body" style="padding:0;">
+        <table class="data">
+            <thead>
+            <tr>
+                <th>Date / Time</th>
+                <th>Business Date</th>
+                <th>Processor</th>
+                <th>Customer</th>
+                <th>Location</th>
+                <th>Bag Number</th>
+                <th class="num">Total</th>
+                <th>Status</th>
+                <th>Duplicate</th>
+                <th></th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for t in transactions %}
+            <tr>
+                <td>{{ t.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+                <td>{{ t.business_date }}</td>
+                <td>{{ t.username }}</td>
+                <td>{{ t.customer_id }}</td>
+                <td>{{ t.location_id }}</td>
+                <td>{{ t.bag_number }}</td>
+                <td class="num">&euro;{{ "%.2f"|format(t.total_value) }}</td>
+                <td>
+                    {% if t.balance_status.value == "BALANCED" %}
+                    <span class="badge badge-success">BALANCED</span>
+                    {% elif "NOT" in t.balance_status.value %}
+                    <span class="badge badge-warning">NOT BALANCED</span>
+                    {% else %}
+                    <span class="badge badge-muted">PENDING</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if t.duplicate_flag_status == "confirmed_duplicate" %}
+                    <span class="badge badge-error">CONFIRMED DUP</span>
+                    {% elif t.duplicate_flag_status == "pending_review" %}
+                    <span class="badge badge-warning">PENDING REVIEW</span>
+                    {% endif %}
+                </td>
+                <td><a href="/web/transactions/{{ t.transaction_id }}">View</a></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="10" class="text-muted" style="text-align:center; padding:20px;">No transactions match the selected filters.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}

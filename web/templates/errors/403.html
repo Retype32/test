@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Access Denied — Brink's Nexus</title>
+    <link rel="stylesheet" href="/web/static/css/theme.css">
+</head>
+<body>
+<div class="centered-page">
+    <div class="auth-card">
+        <div class="auth-header">
+            <div class="name">ACCESS DENIED</div>
+            <div class="tagline">You don't have permission to view this page</div>
+        </div>
+        <div class="auth-body" style="text-align:center;">
+            <p class="text-muted">{{ detail or "Insufficient permissions for this action." }}</p>
+            <a class="btn btn-primary" href="/web/dashboard">Back to Dashboard</a>
+        </div>
+    </div>
+</div>
+</body>
+</html>

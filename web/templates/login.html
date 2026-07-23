@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Sign In — Brink's Nexus</title>
+    <link rel="stylesheet" href="/web/static/css/theme.css">
+</head>
+<body>
+<div class="centered-page">
+    <div class="auth-card">
+        <div class="auth-header">
+            <div class="name">BRINK'S NEXUS</div>
+            <div class="tagline">Cash Operations Platform &mdash; Web Portal</div>
+        </div>
+        <div class="auth-body">
+            {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+            <form method="post" action="/web/login">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" required autofocus>
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required>
+                <button class="btn btn-primary" type="submit">SIGN IN</button>
+            </form>
+        </div>
+    </div>
+</div>
+</body>
+</html>

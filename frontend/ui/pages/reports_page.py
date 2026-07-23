@@ -175,13 +175,21 @@ class ReportsPage(QWidget):
         return result.data or []
 
     def _enrich_transactions(self, transactions: list[dict]) -> list[dict]:
+        customer_names: dict[str, str] = {}
+        location_names: dict[str, str] = {}
+        customers_result = api.list_customers()
+        if customers_result.ok:
+            for c in customers_result.data or []:
+                customer_names[c["customer_id"]] = c["customer_name"]
+                for loc in c.get("locations", []):
+                    location_names[loc["location_id"]] = loc["location_name"]
+
         enriched = []
         for t in transactions:
             enriched.append({
                 **t,
-                "username": t.get("user_id", "")[:8],
-                "customer_name": t.get("customer_id", ""),
-                "location_name": t.get("location_id", ""),
+                "customer_name": customer_names.get(t.get("customer_id", ""), t.get("customer_id", "")),
+                "location_name": location_names.get(t.get("location_id", ""), t.get("location_id", "")),
                 "created_at": datetime.fromisoformat(t["created_at"]) if isinstance(t.get("created_at"), str) else t.get("created_at"),
             })
         return enriched
