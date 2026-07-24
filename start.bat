@@ -19,12 +19,7 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 echo  Starting backend server...
-start cmd /k "cd /d "%~dp0" && .venv\Scripts\activate && python run_backend.py"
-
-echo  Waiting for backend to initialise...
-timeout /t 4 /nobreak >nul
-
-echo  Launching desktop application...
-.venv\Scripts\python main.py
+echo  Once ready, open http://127.0.0.1:8000/web/login in your browser.
+.venv\Scripts\python run_backend.py
 
 pause

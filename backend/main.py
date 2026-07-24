@@ -12,6 +12,7 @@ from .api.routes import auth, customers, transactions, catalogs, eod, notificati
 from web.routes import (
     auth_web, catalog_web, dashboard_web, transactions_web, reports_web,
     eod_web, notifications_web, duplicates_web, stats_web, admin_web,
+    transaction_entry_web,
 )
 from web.templating import templates
 
@@ -73,6 +74,7 @@ app.include_router(stats.router, prefix="/api/v1")
 app.include_router(auth_web.router, prefix="/web")
 app.include_router(catalog_web.router, prefix="/web")
 app.include_router(dashboard_web.router, prefix="/web")
+app.include_router(transaction_entry_web.router, prefix="/web")
 app.include_router(transactions_web.router, prefix="/web")
 app.include_router(reports_web.router, prefix="/web")
 app.include_router(eod_web.router, prefix="/web")

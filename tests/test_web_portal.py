@@ -26,10 +26,12 @@ async def test_login_form_loads(web_client):
     assert "SIGN IN" in r.text
 
 
-async def test_cashier_login_rejected_by_web_portal(web_client):
-    r = await web_client.post("/web/login", data={"username": "cashier1", "password": "cash1"})
-    assert r.status_code == 403
-    assert "supervisors and administrators only" in r.text
+async def test_cashier_login_redirects_to_catalog_picker(web_client):
+    r = await web_client.post(
+        "/web/login", data={"username": "cashier1", "password": "cash1"}, follow_redirects=False
+    )
+    assert r.status_code == 303
+    assert r.headers["location"] == "/web/catalog"
 
 
 async def test_supervisor_walkthrough_of_read_only_pages(web_client):

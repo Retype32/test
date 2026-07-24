@@ -64,22 +64,11 @@ python -m database.seed
 
 ---
 
-## 4. Launch the Desktop Application
+## 4. Open the Web Portal
 
-In a second terminal (with the venv active):
+With the backend running, open `http://127.0.0.1:8000/web/login` in a browser. `start.bat` (Windows) starts the backend for you and prints that URL.
 
-```bash
-python main.py
-```
-
-Or use one of the combined launchers, which start the backend and the desktop app together:
-
-```bash
-python start.py          # cross-platform
-start.bat                 # Windows, opens the backend in its own console window
-```
-
-After logging in, you'll be asked to pick a **Processing Catalog** (VMS / Brink's Dayshift / Brink's Complete / ESNF) — each is a fully separate dataset (its own customers, transactions, reports). You can switch catalogs at any time from the sidebar without logging out.
+After logging in, you'll be asked to pick a **Processing Catalog** (VMS / Brink's Dayshift / Brink's Complete / ESNF) — each is a fully separate dataset (its own customers, transactions, reports). You can switch catalogs at any time from the sidebar without logging out. Cashiers land on **New Transaction**; supervisors and administrators land on the **Dashboard** and additionally get Transaction Viewer, Reports, Statistics, EOD, and Duplicates (administrators also get Staff management).
 
 ---
 
@@ -92,7 +81,7 @@ After logging in, you'll be asked to pick a **Processing Catalog** (VMS / Brink'
 | cashier1    | cash1    | Cashier       |
 | cashier2    | cash2    | Cashier       |
 
-**Change all passwords before any production use.** Cashier accounts can only use the desktop app; the web portal is restricted to supervisors and administrators.
+**Change all passwords before any production use.**
 
 ---
 
@@ -112,24 +101,17 @@ BrinksNexus/
 ├── alembic_catalog/        — Migrations for the shared catalog schema (run once per catalog, see below)
 ├── database/
 │   └── seed.py             — Sample data seeder (core users + all 4 catalogs)
-├── frontend/
-│   ├── services/
-│   │   └── api_client.py   — HTTP client for the backend JSON API
-│   └── ui/
-│       ├── dialogs/        — Modal dialogs (login, catalog picker, EOD reopen, transfer, duplicate review, ...)
-│       ├── pages/          — Full-page views (transactions, reports, stats, settings, ...)
-│       ├── main_window.py  — Main app window, sidebar, notification polling
-│       └── theme.py        — Colors, fonts, stylesheet
-├── web/                     — Server-rendered web portal (Jinja2), supervisor/admin only
+├── web/                     — Server-rendered web portal (Jinja2) — the only front end
 │   ├── routes/              — One module per page area, mirrors backend/api/routes
+│   │                          (transaction_entry_web.py is the cashier New Transaction flow)
 │   ├── templates/           — Jinja2 templates
-│   └── static/css/theme.css — Mirrors frontend/ui/theme.py's palette
+│   └── static/css/theme.css — Portal color palette/stylesheet
 ├── reports/
-│   └── report_engine.py    — Excel + CSV export engine (shared by desktop and web)
-├── hardware/                — Banknote counter drivers (serial/TCP/mock)
-├── main.py                  — Desktop app entry point
-├── run_backend.py           — Backend server launcher
-├── start.py / start.bat     — Combined backend + desktop launchers
+│   └── report_engine.py    — Excel + CSV export engine
+├── hardware/                — Banknote counter drivers (serial/TCP/mock), invoked from
+│                               web/routes/transaction_entry_web.py
+├── run_backend.py           — Backend + web portal server launcher
+├── start.bat                — Windows launcher (starts the backend, prints the portal URL)
 ├── requirements.txt
 └── .env
 ```
@@ -138,11 +120,11 @@ BrinksNexus/
 
 ## Architecture Notes
 
-- **Multi-catalog data model**: `User` lives in a shared core database (`core.db`); everything else (customers, transactions, EOD closures, notifications, duplicate flags) lives in one fully separate database per catalog. A request's `X-Catalog` header (desktop/API) or session-stored catalog (web) selects which one it hits.
-- **Clean Architecture**: UI → Services → Repositories → Models, consistently across the JSON API, desktop app, and web portal.
-- **Authentication**: JWT Bearer tokens for the desktop app and JSON API; signed session cookies for the web portal. Both hash passwords with bcrypt.
+- **Multi-catalog data model**: `User` lives in a shared core database (`core.db`); everything else (customers, transactions, EOD closures, notifications, duplicate flags) lives in one fully separate database per catalog. A request's `X-Catalog` header (JSON API) or session-stored catalog (web) selects which one it hits.
+- **Clean Architecture**: UI → Services → Repositories → Models, consistently across the JSON API and web portal.
+- **Authentication**: JWT Bearer tokens for the JSON API; signed session cookies for the web portal. Both hash passwords with bcrypt.
 - **Async backend**: FastAPI + SQLAlchemy async (aiosqlite by default, asyncpg if you point a `DATABASE_URL_*` at Postgres).
-- **Role-based access**: cashier / supervisor / administrator, enforced at the API layer and mirrored in both UIs. The web portal only accepts supervisor/administrator logins.
+- **Role-based access**: cashier / supervisor / administrator, enforced at the API layer and mirrored in the web portal's navigation and route guards. Cashiers see New Transaction only; supervisors additionally see Dashboard/Transaction Viewer/Reports/Statistics/EOD/Duplicates; administrators also see Staff management.
 - **Migrations**: schema changes are tracked with Alembic. The core database uses `alembic.ini`; the catalog schema (shared by all 4 catalog databases) uses `alembic_catalog.ini` with a `-x catalog=<vms|dayshift|complete|esnf>` flag to target a specific database, e.g.:
 
   ```bash

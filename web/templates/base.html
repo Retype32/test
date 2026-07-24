@@ -19,7 +19,12 @@
         <nav>
             <a class="nav-link" href="/web/catalog">&#8644; Switch Catalog</a>
             {% if catalog_name %}
+            {% if user.role.value in ("supervisor", "administrator") %}
             <a class="nav-link badge-link" href="/web/notifications">&#128276; Notifications{% if notification_count %} ({{ notification_count }}){% endif %}</a>
+            {% endif %}
+            <div class="section-label">Cashier</div>
+            <a class="nav-link {% if active_nav == 'new_transaction' %}active{% endif %}" href="/web/transactions/new">New Transaction</a>
+            {% if user.role.value in ("supervisor", "administrator") %}
             <div class="section-label">Supervisor</div>
             <a class="nav-link {% if active_nav == 'dashboard' %}active{% endif %}" href="/web/dashboard">Dashboard</a>
             <a class="nav-link {% if active_nav == 'transactions' %}active{% endif %}" href="/web/transactions">Transaction Viewer</a>
@@ -27,6 +32,7 @@
             <a class="nav-link {% if active_nav == 'stats' %}active{% endif %}" href="/web/stats">Statistics</a>
             <a class="nav-link {% if active_nav == 'eod' %}active{% endif %}" href="/web/eod">End of Day</a>
             <a class="nav-link {% if active_nav == 'duplicates' %}active{% endif %}" href="/web/duplicates">Duplicates</a>
+            {% endif %}
             {% if user.role.value == "administrator" %}
             <div class="section-label">Admin</div>
             <a class="nav-link {% if active_nav == 'admin_users' %}active{% endif %}" href="/web/admin/users">Staff</a>

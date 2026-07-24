@@ -21,4 +21,5 @@ async def catalog_select_submit(request: Request, current_user: WebCurrentUser, 
         raise HTTPException(status_code=400, detail=f"Unknown catalog '{code}'")
 
     request.session["catalog"] = catalog_code.value
-    return RedirectResponse("/web/dashboard", status_code=303)
+    landing = "/web/transactions/new" if current_user.role.value == "cashier" else "/web/dashboard"
+    return RedirectResponse(landing, status_code=303)
