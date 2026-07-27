@@ -28,27 +28,61 @@ from pathlib import Path
 DEFAULT_DIR = Path(__file__).resolve().parent.parent / "reports" / "captures"
 
 
+# USB-to-serial bridge chips commonly built into industrial equipment, and the
+# generic CDC-ACM class used when a device presents its own virtual COM port.
+_KNOWN_BRIDGES = {
+    "0403": "FTDI",
+    "067B": "Prolific",
+    "10C4": "Silicon Labs CP210x",
+    "1A86": "WCH CH340/CH341",
+    "2341": "Arduino (CDC)",
+}
+
+
 def list_ports() -> int:
-    """Show the serial ports Windows can see, so the right one can be picked."""
+    """Show the serial ports Windows can see, so the right one can be picked.
+
+    A machine connected over USB usually appears here too: industrial equipment
+    with a USB Type B socket typically presents a virtual COM port (USB CDC, or
+    an internal FTDI/Prolific bridge). If it shows up, it is usable exactly like
+    a physical RS232 port and needs no special support.
+    """
     from serial.tools import list_ports as lp
 
     ports = sorted(lp.comports(), key=lambda p: p.device)
     if not ports:
-        print("No serial ports found on this PC.")
-        print()
-        print("This machine has no RS232 port and no USB-to-serial adapter")
-        print("attached. You need one of:")
-        print("  - a built-in RS232 port (older desktops / industrial PCs), or")
-        print("  - a USB-to-serial adapter (FTDI or Prolific chipset), plus")
-        print("  - a null-modem cable from the machine's printer port.")
+        print("No serial ports found on this PC.\n")
+        print("If the machine is plugged in over USB, it is not presenting a")
+        print("virtual COM port. Check Device Manager for an unrecognised device")
+        print("under 'Other devices' — that means a vendor USB driver is missing.")
+        print("Install the manufacturer's USB driver and run this again.\n")
+        print("Otherwise you need either:")
+        print("  - a USB cable to the machine's USB device port, or")
+        print("  - a USB-to-serial adapter plus a null-modem cable to its")
+        print("    RS232 printer port.")
         return 1
 
     print(f"{len(ports)} serial port(s) found:\n")
+    usb_ports = []
     for p in ports:
         print(f"  {p.device:<8} {p.description}")
         if p.hwid and p.hwid != "n/a":
             print(f"           {p.hwid}")
-    print("\nSet COUNTER_COM_PORT in .env to the port the machine is wired to.")
+        if p.vid is not None:
+            vid = f"{p.vid:04X}"
+            bridge = _KNOWN_BRIDGES.get(vid)
+            kind = f"USB device, {bridge} bridge" if bridge else "USB device"
+            maker = f" — {p.manufacturer}" if p.manufacturer else ""
+            print(f"           {kind}: VID {vid} PID {p.pid:04X}{maker}")
+            usb_ports.append(p.device)
+        print()
+
+    if usb_ports:
+        print(f"USB-attached port(s): {', '.join(usb_ports)}")
+        print("A machine on USB is read exactly like one on RS232 — no adapter,")
+        print("no null-modem cable, and no code change. Point COUNTER_COM_PORT")
+        print("at it and continue with --doctor.\n")
+    print("Set COUNTER_COM_PORT in .env to the port the machine is wired to.")
     return 0
 
 
@@ -89,15 +123,20 @@ def doctor(port: str, baud: int, profile_name: str, listen_seconds: int = 20) ->
     # 3. Serial port exists.
     from serial.tools import list_ports as lp
 
-    available = {p.device.upper(): p.description for p in lp.comports()}
+    available = {p.device.upper(): p for p in lp.comports()}
     if not available:
-        print("[FAIL] No serial ports on this PC. Attach a USB-to-serial "
-              "adapter and a null-modem cable to the machine's printer port.")
+        print("[FAIL] No serial ports on this PC.")
+        print("       Connect the machine over USB (it should appear as a")
+        print("       virtual COM port), or attach a USB-to-serial adapter and")
+        print("       a null-modem cable to its RS232 printer port.")
+        print("       Run 'python -m hardware.capture --list-ports' for detail.")
         return 1
     if port.upper() not in available:
         print(f"[FAIL] {port} not found. Available: {', '.join(sorted(available))}")
         return 1
-    print(f"[ok]   {port} exists ({available[port.upper()]})")
+    info = available[port.upper()]
+    over_usb = " over USB" if info.vid is not None else ""
+    print(f"[ok]   {port} exists{over_usb} ({info.description})")
 
     # 4. Serial port opens.
     import serial

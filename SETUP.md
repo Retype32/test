@@ -108,16 +108,28 @@ both **PC-side** Windows port names. Neither says anything about which physical
 socket on the C1 is in use, or how many serial interfaces the machine has —
 consult the C1's own interface menu or G+D documentation for that.
 
-**2. Wire it up.** Null-modem cable from the C1's serial port to the PC. If the
-PC has no RS232 port, use a USB-to-serial adapter (FTDI or Prolific chipset).
-Confirm Windows sees it:
+**2. Wire it up.** Two options, and USB is the easier one if the machine
+supports it:
+
+- **USB** — a standard A-to-B cable from the machine's USB device socket to the
+  PC. Industrial equipment usually presents this as a *virtual COM port* (USB
+  CDC, or an internal FTDI/Prolific bridge). If it does, Windows assigns it a
+  COM number and it is read exactly like RS232 — no adapter, no null-modem
+  cable, and no code change, because a virtual COM port is a COM port.
+- **RS232** — a null-modem cable from the machine's serial printer port. If the
+  PC has no RS232 socket, add a USB-to-serial adapter (FTDI or Prolific).
+
+Either way, confirm Windows sees a port:
 
 ```bash
 python -m hardware.capture --list-ports
 ```
 
-If that prints nothing, the cable or adapter is the problem — stop and fix it
-before going further, because every later step depends on it.
+This identifies USB-attached ports and names the bridge chip. If nothing
+appears while the machine is plugged in over USB, it is not presenting a
+virtual COM port — check Device Manager for an unrecognised device under
+"Other devices", which means a vendor USB driver is missing. Stop and fix this
+before going further; every later step depends on it.
 
 **3. Run the preflight.** This checks the profile, the parser, the port, and
 then listens for a real batch — it tells you exactly which step is failing:
