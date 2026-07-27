@@ -259,17 +259,38 @@ options below that leave ISA untouched are usually preferable.
 
 The upside is that such a PC is already fully configured: the C1 is provably
 printing its report to serial, at known line settings, or ISA could not read it
-either. Only the ownership conflict has to be resolved:
+either. And the port conflict does not have to be resolved at all:
+
+**Preferred: `COUNTER_MODE=isa_log` — read ISA's own log instead of the port.**
+ISA's device plugin logs everything it reads from the machine (its Common
+library writes `DEVICE_LOG.LOG` in a configured log directory). At the `Info`
+logging level — the shipped default in the plugin config — every batch produces
+`Product Code = <isacode> , Quantity = <n> ... sent to ISA.` entries, and those
+ISA codes map directly onto the denominations in our device profiles. A log
+file can be read by any number of programs while ISA writes it, so Nexus tails
+it and books the same counts ISA books: no port conflict, no cabling, nothing
+about ISA touched or stopped.
+
+```env
+COUNTER_MODE=isa_log
+ISA_LOG_DIR=C:\path\to\isa\device\logs
+```
+
+Find the directory by locating `DEVICE_LOG.LOG` on the ISA PC (ask the ISA
+administrator, or search the ISA installation folder). The driver only reads
+batches counted after Nexus connects — old log content is never re-booked.
+Two dependencies to be aware of: counts flow only while ISA is running, and
+only while its plugin `logging level` stays at `Info` or lower.
+
+If ISA is not running, or Nexus is on its own machine, the direct options:
 
 | Option | Both keep working? | Effort |
 |---|---|---|
-| Close ISA while using Nexus | No — one at a time | none |
+| `isa_log` (above) | Yes | find the log folder |
+| Close ISA while using Nexus | No — one at a time | admin sign-off |
 | Second report output on another C1 interface, if the firmware allows one | Yes | machine config |
 | Passive Y-cable tap on the C1's transmit line | Yes | a cable |
 | Nexus on a separate PC, own cable | Yes | a PC and a cable |
-
-Closing ISA is the right way to prove the integration works the first time.
-Decide on a permanent arrangement afterwards.
 
 The passive tap works only because this driver is listen-only — it never
 transmits a byte, so it cannot corrupt ISA's data or disturb the machine. That

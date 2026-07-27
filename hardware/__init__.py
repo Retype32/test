@@ -7,6 +7,9 @@ def get_counter() -> CashCounter:
     if COUNTER_MODE in {"c1_report", "serial"}:
         from .gd_c1_report import GDC1ReportCounter
         return GDC1ReportCounter()
+    if COUNTER_MODE == "isa_log":
+        from .isa_log import ISALogCounter
+        return ISALogCounter()
     if COUNTER_MODE == "mock":
         from .mock import MockCounter
         return MockCounter()
@@ -14,7 +17,7 @@ def get_counter() -> CashCounter:
         raise ConnectionError("No cash counter configured. Enter counts manually.")
     raise ValueError(
         f"Unknown COUNTER_MODE={COUNTER_MODE!r}. "
-        "Set COUNTER_MODE to 'c1_report', 'mock', or 'none' in .env."
+        "Set COUNTER_MODE to 'c1_report', 'isa_log', 'mock', or 'none' in .env."
     )
 
 

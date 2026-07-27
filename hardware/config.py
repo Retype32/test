@@ -21,3 +21,8 @@ COUNTER_STRICT: bool = os.getenv("COUNTER_STRICT", "true").lower() in {"1", "tru
 # If the configured profile cannot parse a report, try the other installed
 # profiles and accept one only if its totals agree with its own rows.
 COUNTER_AUTODETECT: bool = os.getenv("COUNTER_AUTODETECT", "true").lower() in {"1", "true", "yes"}
+
+# Used when COUNTER_MODE=isa_log: directory where ISA's device plugin writes
+# its log files (the folder containing DEVICE_LOG.LOG or similar).
+ISA_LOG_DIR: str = os.getenv("ISA_LOG_DIR", "")
+ISA_LOG_POLL_SECONDS: float = float(os.getenv("ISA_LOG_POLL_SECONDS", "0.25"))
