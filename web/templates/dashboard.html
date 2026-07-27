@@ -1,47 +1,64 @@
 {% extends "base.html" %}
 {% block title %}Dashboard — Brink's Nexus{% endblock %}
 {% block page_title %}Dashboard{% endblock %}
-{% block page_subtitle %}Supervisor &#9656; Dashboard &mdash; {{ today }}{% endblock %}
+{% block page_subtitle %}Supervisor <span class="crumb">&#9656;</span> {{ today }}{% endblock %}
+
+{% block header_actions %}
+<a class="btn btn-sm" href="/web/reports">Export</a>
+<a class="btn btn-sm btn-primary" href="/web/transactions">Open Viewer</a>
+{% endblock %}
+
 {% block content %}
 
 <div class="stat-grid">
-    <div class="stat-tile">
+    <div class="stat-tile {% if day_closed %}bad{% else %}ok{% endif %}">
         <div class="label">Business Day</div>
-        <div class="value" style="font-size:18px;">
+        <div class="value sm" style="margin-top:6px;">
             {% if day_closed %}
-            <span class="badge badge-error">CLOSED</span>
+            <span class="badge badge-error">Closed</span>
             {% else %}
-            <span class="badge badge-success">OPEN</span>
+            <span class="badge badge-success">Open</span>
             {% endif %}
         </div>
+        <div class="meta">{{ today }}</div>
     </div>
+
     <div class="stat-tile">
         <div class="label">Slips Today</div>
         <div class="value">{{ total_slips }}</div>
+        <div class="meta">Transactions recorded</div>
     </div>
-    <div class="stat-tile">
+
+    <div class="stat-tile gold">
         <div class="label">Cash Volume Today</div>
         <div class="value">&euro;{{ "%.2f"|format(total_cash) }}</div>
+        <div class="meta">Total counted value</div>
     </div>
-    <div class="stat-tile">
+
+    <div class="stat-tile {% if total_errors > 0 %}bad{% else %}ok{% endif %}">
         <div class="label">Errors Today</div>
-        <div class="value" style="color: {% if total_errors > 0 %}var(--error){% else %}var(--success){% endif %};">{{ total_errors }}</div>
+        <div class="value" style="color: {% if total_errors > 0 %}var(--bad-fg){% else %}var(--ok-fg){% endif %};">{{ total_errors }}</div>
+        <div class="meta">{% if total_errors > 0 %}Needs review{% else %}All balanced{% endif %}</div>
     </div>
+
     <div class="stat-tile">
         <div class="label">Active Processors</div>
         <div class="value">{{ processor_count }}</div>
+        <div class="meta">Staff counting today</div>
     </div>
 </div>
 
 <div class="card">
-    <div class="card-header">QUICK LINKS</div>
+    <div class="card-header">Quick Links</div>
     <div class="card-body">
-        <a class="btn" href="/web/transactions">Transaction Viewer</a>
-        <a class="btn" href="/web/reports">Reports</a>
-        <a class="btn" href="/web/stats">Statistics</a>
-        <a class="btn" href="/web/eod">End of Day</a>
-        <a class="btn" href="/web/duplicates">Duplicates</a>
-        <a class="btn" href="/web/notifications">Notifications</a>
+        <div class="btn-group">
+            <a class="btn" href="/web/transactions"><span aria-hidden="true">&#9776;</span> Transaction Viewer</a>
+            <a class="btn" href="/web/reports"><span aria-hidden="true">&#8681;</span> Reports</a>
+            <a class="btn" href="/web/stats"><span aria-hidden="true">&#9650;</span> Statistics</a>
+            <a class="btn" href="/web/eod"><span aria-hidden="true">&#9673;</span> End of Day</a>
+            <a class="btn" href="/web/duplicates"><span aria-hidden="true">&#8709;</span> Duplicates</a>
+            <a class="btn" href="/web/notifications"><span aria-hidden="true">&#9679;</span> Notifications</a>
+        </div>
     </div>
 </div>
 

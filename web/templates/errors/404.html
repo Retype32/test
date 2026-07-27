@@ -2,18 +2,36 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
     <title>Not Found — Brink's Nexus</title>
     <link rel="stylesheet" href="/web/static/css/theme.css">
+    <link rel="icon" type="image/svg+xml" href="/web/static/img/nexus-mark.svg">
+    <script>
+        (function () {
+            try {
+                var saved = localStorage.getItem("nexus-theme");
+                if (saved === "dark" || saved === "light") {
+                    document.documentElement.setAttribute("data-theme", saved);
+                }
+            } catch (e) { /* ignore */ }
+        })();
+    </script>
 </head>
 <body>
 <div class="centered-page">
     <div class="auth-card">
         <div class="auth-header">
+            {% include "partials/_brand_lockup.html" %}
+            <div class="err-code" aria-hidden="true">404</div>
             <div class="name">NOT FOUND</div>
             <div class="tagline">That page doesn't exist</div>
         </div>
         <div class="auth-body" style="text-align:center;">
-            <a class="btn btn-primary" href="/web/dashboard">Back to Dashboard</a>
+            <p class="text-muted" style="margin-top:0;">
+                The page may have been moved, or the link may be out of date.
+            </p>
+            <a class="btn btn-primary btn-block" href="/web/dashboard">Back to Dashboard</a>
         </div>
     </div>
 </div>

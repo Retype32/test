@@ -1,0 +1,33 @@
+{#
+  Compact sidebar lockup: BRINKS wordmark with NEXUS beneath it. Sized for the
+  244px rail, inheriting currentColor so it reads against the dark navy.
+#}
+<svg class="brand-rail-logo" viewBox="0 0 300 108" role="img"
+     aria-label="Brink's Nexus" xmlns="http://www.w3.org/2000/svg">
+  <title>Brink's Nexus</title>
+  <defs>
+    <linearGradient id="nexusRailFill" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#ffffff"/>
+      <stop offset="45%"  stop-color="#cfe0f2"/>
+      <stop offset="100%" stop-color="#e0bc4b"/>
+    </linearGradient>
+  </defs>
+
+  <g fill="currentColor">
+    <rect x="0"  y="6" width="3"  height="36" rx="1"/>
+    <rect x="6"  y="6" width="3"  height="36" rx="1"/>
+    <rect x="12" y="6" width="3"  height="36" rx="1"/>
+    <rect x="18" y="6" width="4"  height="36" rx="1"/>
+    <rect x="25" y="6" width="5"  height="36" rx="1"/>
+    <rect x="33" y="6" width="6"  height="36" rx="1"/>
+    <rect x="42" y="6" width="8"  height="36" rx="1"/>
+    <rect x="53" y="6" width="10" height="36" rx="1"/>
+  </g>
+  <text x="67" y="42" fill="currentColor"
+        font-family="'Arial Black','Segoe UI Black','Helvetica Neue',Impact,sans-serif"
+        font-weight="900" font-size="47" letter-spacing="-2">BRINKS</text>
+
+  <text x="0" y="96" fill="url(#nexusRailFill)"
+        font-family="'Arial Black','Segoe UI Black','Helvetica Neue',Impact,sans-serif"
+        font-weight="900" font-size="48" letter-spacing="10.5">NEXUS</text>
+</svg>
