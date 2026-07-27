@@ -86,6 +86,98 @@ def list_ports() -> int:
     return 0
 
 
+def _powershell(script: str) -> list[str]:
+    """Run a short PowerShell query and return its output lines."""
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [line.rstrip() for line in out.stdout.splitlines() if line.strip()]
+
+
+def port_status() -> int:
+    """Show which serial ports are free, and what is likely holding the busy ones.
+
+    ISA is a browser-based application, so there is no window to close: the
+    process that owns the machine's port is an ISA service on this PC, and the
+    browser is only its user interface. This locates that service.
+    """
+    import serial
+    from serial.tools import list_ports as lp
+
+    ports = sorted(lp.comports(), key=lambda p: p.device)
+    if not ports:
+        print("No serial ports on this PC — nothing can be holding one.\n")
+    else:
+        print("Serial ports:\n")
+        busy = []
+        for p in ports:
+            try:
+                handle = serial.Serial(port=p.device, timeout=0.1)
+            except serial.SerialException as exc:
+                detail = str(exc).lower()
+                if "access is denied" in detail or "permission" in detail:
+                    print(f"  {p.device:<8} IN USE by another program   ({p.description})")
+                    busy.append(p.device)
+                else:
+                    print(f"  {p.device:<8} error: {exc}")
+                continue
+            handle.close()
+            print(f"  {p.device:<8} free                       ({p.description})")
+        print()
+        if not busy:
+            print("Every port is free. Nothing is in the way.\n")
+
+    # Deliberately narrow. Generic words like "Device" match dozens of built-in
+    # Windows services and drown the real answer in noise.
+    pattern = "ISA|CPS|DeLaRue|De La Rue|Compass|Giesecke|GDUSB|BPS|Cash|Currency|Banknote"
+
+    print("Looking for non-Microsoft services that may own a machine port...\n")
+    services = _powershell(
+        "Get-CimInstance Win32_Service | Where-Object { "
+        "($_.Name -match '" + pattern + "' -or $_.DisplayName -match '" + pattern + "') "
+        "-and $_.PathName -notmatch [regex]::Escape($env:SystemRoot) } | "
+        "Select-Object -First 20 | "
+        "ForEach-Object { '{0,-9} {1,-26} {2}' -f $_.State, $_.Name, $_.PathName }"
+    )
+    if services:
+        print("  Candidate services (state, name, executable):")
+        for line in services:
+            print(f"    {line}")
+    else:
+        print("  No matching third-party service found on this PC.")
+
+    print()
+    processes = _powershell(
+        "Get-Process | Where-Object { $_.ProcessName -match '" + pattern + "' -and "
+        "$_.Path -notmatch [regex]::Escape($env:SystemRoot) } | "
+        "Select-Object -First 20 | "
+        "ForEach-Object { '{0,-8} {1,-24} {2}' -f $_.Id, $_.ProcessName, $_.Path }"
+    )
+    if processes:
+        print("  Candidate running programs (pid, name, executable):")
+        for line in processes:
+            print(f"    {line}")
+    else:
+        print("  No matching third-party program running on this PC.")
+
+    print(
+        "\nISA's browser window is only its user interface. The component that\n"
+        "holds the serial port is an ISA service or background process on the PC\n"
+        "the machine is cabled to, so closing the browser frees nothing.\n"
+        "\n"
+        "Names above are only candidates — confirm with whoever administers ISA\n"
+        "before stopping anything. Stopping the wrong service, or the right one\n"
+        "at the wrong time, can take counting offline for other users."
+    )
+    return 0
+
+
 def doctor(port: str, baud: int, profile_name: str, listen_seconds: int = 20) -> int:
     """Check everything that can be checked before a real batch is run."""
     ok = True
@@ -292,11 +384,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--profile", default="bps_c1_eur", help="device profile to parse with")
     ap.add_argument("--list-ports", action="store_true", help="list available serial ports and exit")
     ap.add_argument("--doctor", action="store_true", help="run the full preflight check")
+    ap.add_argument("--port-status", action="store_true",
+                    help="show which ports are busy and what may be holding them")
     ap.add_argument("--listen-seconds", type=int, default=20, help="doctor listen window")
     args = ap.parse_args(argv)
 
     if args.list_ports:
         return list_ports()
+    if args.port_status:
+        return port_status()
     if args.doctor:
         return doctor(args.port, args.baud, args.profile, args.listen_seconds)
     if args.parse:

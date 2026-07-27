@@ -243,6 +243,20 @@ one owner, and ISA's BPS C1 plugin opens the machine's printer port when the
 plugin loads and holds it until the plugin unloads. Nexus will fail at
 `connect()` with "already in use".
 
+ISA is browser-based, so there is no window to close. The browser is only its
+user interface; the component holding the port is an ISA service or background
+process on the PC the machine is cabled to. To see what is running:
+
+```bash
+python -m hardware.capture --port-status
+```
+
+This reports which ports are free or in use and lists non-Microsoft services
+and programs whose names suggest they belong to ISA or Compass. Treat the
+results as candidates to discuss with whoever administers ISA — **stopping an
+ISA service can take counting offline for other users**, which is why the
+options below that leave ISA untouched are usually preferable.
+
 The upside is that such a PC is already fully configured: the C1 is provably
 printing its report to serial, at known line settings, or ISA could not read it
 either. Only the ownership conflict has to be resolved:
