@@ -23,6 +23,9 @@ openpyxl==3.1.5
 
 # Hardware
 pyserial==3.5
+# Only needed to probe the C1's USB interface (hardware/usb_probe.py). The
+# serial report driver does not use it.
+pyusb==1.2.1
 
 # Dev / test
 pytest==8.3.3

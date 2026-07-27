@@ -184,6 +184,41 @@ accepting one would book a short count as a real one.
 `hardware/profiles/`, adjust the denominations and labels, and point
 `COUNTER_PROFILE` at it. No code changes are needed.
 
+### The C1's USB port
+
+The C1's USB interface is not a virtual COM port. G+D drive it with their MAUSB
+driver, which is a rebadged **libusb-win32**: `mausb.sys` identifies itself as
+"LibUSB-Win32 - Kernel Driver" and creates `\Device\libusb0`, and `mausb.dll`
+exports the standard libusb-0.1 API. `MAUSB.inf` binds it to `USB\VID_10c4&PID_ea63`
+under class `USB`, not class `Ports` — so no COM port appears and neither the
+serial driver here nor ISA's plugin (which is `System.IO.Ports` only) can use it.
+
+The transport is nevertheless open: libusb-0.1 is a public API, and pyusb can
+drive G+D's own DLL directly. `hardware/usb_probe.py` does exactly that:
+
+```bash
+python -m hardware.usb_probe --list           # is the device attached?
+python -m hardware.usb_probe --descriptors    # endpoints and interfaces
+python -m hardware.usb_probe --read           # dump traffic from an IN endpoint
+```
+
+What is *not* known is the application protocol on the bulk endpoints. The
+probe reports whether the captured bytes are mostly printable: if they are, it
+is very likely the same report the printer port emits and
+`hardware/report_parser.py` handles it unchanged. The vendor ID (0x10C4,
+Silicon Labs, a USB-UART bridge maker) makes that plausible but unproven.
+
+Two practical constraints:
+
+- **Compass claims the interface exclusively.** Close it before probing, the
+  same conflict as ISA and the serial port.
+- **The supplied driver is unsigned.** The `.cat` files in the driver folder are
+  168-byte DDK placeholders reading "This file will contain the digital
+  signature…", and the driver dates from 2010. 64-bit Windows 10/11 will not
+  load an unsigned kernel driver with signature enforcement on. On a PC where
+  Compass already runs the driver is installed and working, so probe there
+  rather than weakening signature enforcement on a new machine.
+
 ### Testing without a machine
 
 The simulator renders the batch report in six plausible print templates and
