@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import sys
+import time
 from pathlib import Path
 
 DEFAULT_DIR = Path(__file__).resolve().parent.parent / "reports" / "captures"
@@ -49,6 +50,108 @@ def list_ports() -> int:
             print(f"           {p.hwid}")
     print("\nSet COUNTER_COM_PORT in .env to the port the machine is wired to.")
     return 0
+
+
+def doctor(port: str, baud: int, profile_name: str, listen_seconds: int = 20) -> int:
+    """Check everything that can be checked before a real batch is run."""
+    ok = True
+    print("Brinks Nexus — cash counter preflight\n")
+
+    # 1. Configuration loads.
+    try:
+        from .report_profile import load_profile
+
+        profile = load_profile(profile_name)
+        print(f"[ok]   Profile '{profile_name}' loaded: {profile.name}, "
+              f"{len(profile.denoms)} denominations")
+    except Exception as exc:
+        print(f"[FAIL] Profile '{profile_name}' could not be loaded: {exc}")
+        return 1
+
+    # 2. Parser works end to end against simulated reports.
+    from .simulate import DEFAULT_BATCH, LAYOUTS, build_report
+    from .report_parser import ReportParseError, parse_report
+
+    bad = []
+    for layout in LAYOUTS:
+        try:
+            r = parse_report(build_report(DEFAULT_BATCH, layout), profile)
+            if r.warnings or r.counted_quantity != sum(DEFAULT_BATCH.values()):
+                bad.append(layout)
+        except ReportParseError:
+            bad.append(layout)
+    if bad:
+        print(f"[warn] Parser failed on simulated layouts: {', '.join(bad)}")
+        ok = False
+    else:
+        print(f"[ok]   Parser handled all {len(LAYOUTS)} simulated print layouts")
+
+    # 3. Serial port exists.
+    from serial.tools import list_ports as lp
+
+    available = {p.device.upper(): p.description for p in lp.comports()}
+    if not available:
+        print("[FAIL] No serial ports on this PC. Attach a USB-to-serial "
+              "adapter and a null-modem cable to the machine's printer port.")
+        return 1
+    if port.upper() not in available:
+        print(f"[FAIL] {port} not found. Available: {', '.join(sorted(available))}")
+        return 1
+    print(f"[ok]   {port} exists ({available[port.upper()]})")
+
+    # 4. Serial port opens.
+    import serial
+
+    try:
+        sp = serial.Serial(port=port, baudrate=baud, timeout=0.5)
+    except serial.SerialException as exc:
+        print(f"[FAIL] {port} could not be opened: {exc}")
+        print("       Another program may own it — ISA holds the printer port "
+              "if it is running on this PC.")
+        return 1
+    print(f"[ok]   {port} opened at {baud} baud")
+
+    # 5. Listen for traffic.
+    print(f"\nListening on {port} for {listen_seconds}s — run a batch on the "
+          "machine now and end it so it prints.\n")
+    buf = bytearray()
+    deadline = time.monotonic() + listen_seconds
+    try:
+        while time.monotonic() < deadline:
+            chunk = sp.read(4096)
+            if chunk:
+                buf.extend(chunk)
+    finally:
+        sp.close()
+
+    if not buf:
+        print("[warn] Nothing received. If you did run a batch, check:")
+        print("       - the cable is null-modem, not straight-through")
+        print("       - the machine's report output is routed to serial")
+        print(f"       - the machine's baud rate matches {baud}")
+        return 1
+
+    text = bytes(buf).decode(profile.encoding, errors="replace")
+    print(f"[ok]   Received {len(buf)} bytes")
+    try:
+        report = parse_report(text, profile)
+    except ReportParseError as exc:
+        print(f"[FAIL] Received data did not parse: {exc}")
+        print(f"\nRaw:\n{text}")
+        return 1
+
+    print(f"[ok]   Parsed: {report.denominations}")
+    print(f"       counted {report.counted_quantity} notes, "
+          f"{report.counted_value} {report.currency or ''}".rstrip())
+    if report.warnings:
+        print("[warn] Totals disagree:")
+        for w in report.warnings:
+            print(f"       - {w}")
+        ok = False
+
+    print("\nReady to switch COUNTER_MODE=c1_report." if ok else
+          "\nFix the warnings above before switching COUNTER_MODE=c1_report.")
+    return 0 if ok else 1
 
 
 def _hexdump(data: bytes, width: int = 16) -> str:
@@ -149,10 +252,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--parse", type=Path, help="parse an existing capture instead of listening")
     ap.add_argument("--profile", default="bps_c1_eur", help="device profile to parse with")
     ap.add_argument("--list-ports", action="store_true", help="list available serial ports and exit")
+    ap.add_argument("--doctor", action="store_true", help="run the full preflight check")
+    ap.add_argument("--listen-seconds", type=int, default=20, help="doctor listen window")
     args = ap.parse_args(argv)
 
     if args.list_ports:
         return list_ports()
+    if args.doctor:
+        return doctor(args.port, args.baud, args.profile, args.listen_seconds)
     if args.parse:
         return parse_file(args.parse, args.profile, args.encoding)
     return capture(args.port, args.baud, args.encoding, args.outdir)

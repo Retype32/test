@@ -19,7 +19,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 
-from .report_profile import DeviceProfile
+from .report_profile import DeviceProfile, load_all_profiles
 
 _NUMERIC = re.compile(r"^[+-]?\d[\d., ']*$")
 _CONTROL = {"\x00", "\x0c", "\x1b", "\x07", "\x0e", "\x0f"}
@@ -117,9 +117,10 @@ def _classify_line(line: str, profile: DeviceProfile, report: ParsedReport) -> N
     if _is_column_header(lower, profile):
         return
 
-    denom = profile.denom_by_device_name(line)
-    if denom is not None:
-        _parse_denomination(line, denom, profile, report)
+    match = profile.match_denomination(line.replace("|", " ").split())
+    if match is not None:
+        denom, remainder = match
+        _parse_denomination(line, denom, remainder, profile, report)
         return
 
     # Totals must be tested before subtotals only if one label is a prefix of
@@ -158,9 +159,8 @@ def _is_column_header(lower_line: str, profile: DeviceProfile) -> bool:
     return hits >= 2 and not any(ch.isdigit() for ch in lower_line)
 
 
-def _parse_denomination(line, denom, profile: DeviceProfile, report: ParsedReport) -> None:
-    remainder = line[len(denom.device):]
-    numbers = _numbers_in(remainder, profile)
+def _parse_denomination(line, denom, remainder, profile: DeviceProfile, report: ParsedReport) -> None:
+    numbers = _numbers_in(" ".join(remainder), profile)
     if not numbers:
         report.warnings.append(
             f"Denomination {denom.device} had no quantity on line: {line!r}"
@@ -234,6 +234,44 @@ def _guess_separator(token: str) -> str:
 
 
 # ── validation ───────────────────────────────────────────────────────────────
+
+
+def detect_profile(
+    text: str, profiles: list[DeviceProfile] | None = None
+) -> tuple[DeviceProfile, ParsedReport]:
+    """Pick the profile that best explains a report.
+
+    Used to identify an unknown machine from a capture, and as a fallback when
+    the configured profile cannot parse what arrived. A profile whose totals
+    agree with its own denomination lines always beats one that merely matched
+    more rows, since agreeing totals are very hard to hit by accident.
+    """
+    candidates = profiles if profiles is not None else load_all_profiles()
+    if not candidates:
+        raise ReportParseError("No device profiles are installed.")
+
+    scored: list[tuple[tuple, DeviceProfile, ParsedReport]] = []
+    for profile in candidates:
+        try:
+            report = parse_report(text, profile)
+        except ReportParseError:
+            continue
+        score = (
+            0 if report.warnings else 1,
+            len(report.denominations),
+            -len(report.unmatched_lines),
+        )
+        scored.append((score, profile, report))
+
+    if not scored:
+        raise ReportParseError(
+            "No installed profile could parse this report. Capture it with "
+            "'python -m hardware.capture' and add a matching profile under "
+            "hardware/profiles/."
+        )
+    scored.sort(key=lambda item: item[0], reverse=True)
+    _, profile, report = scored[0]
+    return profile, report
 
 
 def _validate_totals(report: ParsedReport) -> None:

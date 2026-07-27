@@ -114,8 +114,18 @@ python -m hardware.capture --list-ports
 If that prints nothing, the cable or adapter is the problem — stop and fix it
 before going further, because every later step depends on it.
 
-**3. Capture a real report before trusting anything.** The printed layout
-varies by firmware and print template, so confirm it rather than assuming:
+**3. Run the preflight.** This checks the profile, the parser, the port, and
+then listens for a real batch — it tells you exactly which step is failing:
+
+```bash
+python -m hardware.capture --doctor --port COM3
+```
+
+Run a batch on the machine during its listen window. If it finishes with
+"Ready to switch COUNTER_MODE=c1_report", you are done — skip to step 5.
+
+**4. If the preflight couldn't parse what arrived,** capture the raw output so
+the profile can be corrected:
 
 ```bash
 python -m hardware.capture --port COM3 --baud 115200
@@ -124,16 +134,20 @@ python -m hardware.capture --port COM3 --baud 115200
 Run a small test batch on the machine and end it so it prints. Everything
 received is written to `reports/captures/`. Press Ctrl+C to stop.
 
-**4. Tune the profile.** Check the capture against the shipped profile:
+Then check that capture against the shipped profile:
 
 ```bash
 python -m hardware.capture --parse reports/captures/c1-<timestamp>.txt
 ```
 
 If denomination lines aren't recognised, edit `hardware/profiles/bps_c1_eur.json`
-so the `device` names and `labels` match exactly what the machine prints. The
-profile is data, not code — it can be corrected on site. Add the capture to
-`tests/test_c1_report_parser.py` as a regression test once it parses cleanly.
+so the `device` names and `labels` match what the machine prints. Matching is
+already tolerant of spacing and spelling — `EUR 50`, `EUR50`, `€50`, `50 EUR`,
+`EUR 50.00` and bare `50` all resolve to the same denomination — so usually only
+the section labels need changing. Add extra spellings to a denomination's
+`aliases` list if needed. The profile is data, not code: it can be corrected on
+site without a rebuild. Add the capture to `tests/test_c1_report_parser.py` as a
+regression test once it parses cleanly.
 
 **5. Switch the driver on** in `.env`:
 
@@ -152,6 +166,36 @@ accepting one would book a short count as a real one.
 **Adding another currency or machine:** copy an existing profile in
 `hardware/profiles/`, adjust the denominations and labels, and point
 `COUNTER_PROFILE` at it. No code changes are needed.
+
+### Testing without a machine
+
+The simulator renders the batch report in six plausible print templates and
+parses them all, which exercises the entire stack with no hardware attached:
+
+```bash
+python -m hardware.simulate --check
+```
+
+To drive the real driver end to end, install a virtual null-modem pair
+(com0com on Windows), point the simulator at one end and `COUNTER_COM_PORT` at
+the other. Nexus then behaves exactly as it will with a real C1:
+
+```bash
+python -m hardware.simulate --port COM5 --repeat 3
+```
+
+### Sharing the port with ISA
+
+A serial port has one owner: whichever program opens it first locks the other
+out. If ISA already reads the C1's printer port on the same PC, Nexus cannot
+also open it. Options are to use a different free port on the machine (**not
+COM2 — that's the barcode reader**), to run Nexus on a separate PC, or to tap
+the line passively with a Y-cable so both hosts receive the same printout.
+
+The passive tap works only because this driver is listen-only — it never
+transmits a byte, so it cannot corrupt ISA's data or disturb the machine. That
+is enforced by a test (`test_driver_never_writes_to_the_port`). Get sign-off
+from whoever owns the ISA installation before touching production cabling.
 
 ---
 

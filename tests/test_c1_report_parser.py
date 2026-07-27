@@ -10,8 +10,9 @@ from decimal import Decimal
 
 import pytest
 
-from hardware.report_parser import ReportParseError, parse_report
+from hardware.report_parser import ReportParseError, detect_profile, parse_report
 from hardware.report_profile import load_profile
+from hardware.simulate import DEFAULT_BATCH, LAYOUTS, build_report
 
 PROFILE = load_profile("bps_c1_eur")
 
@@ -147,6 +148,67 @@ Total         4        200.00
     r = parse_report(text, PROFILE)
     assert r.denominations == {"€50": 4}
     assert any("USD 20" in line for line in r.unmatched_lines)
+
+
+def test_zero_count_row_is_not_confused_with_a_larger_denomination():
+    """"EUR 50 0" must resolve to EUR 50 with quantity 0, never to EUR 500."""
+    text = """
+Currency  EUR
+EUR 50        0          0.00
+EUR 20        4         80.00
+Total         4         80.00
+"""
+    r = parse_report(text, PROFILE)
+    assert r.denominations == {"€50": 0, "€20": 4}
+    assert r.warnings == []
+
+
+def test_face_value_aliases_do_not_collide_between_5_and_500():
+    """Regression: a bad alias once mapped EUR 500 onto the key "5"."""
+    keys_5 = {d for d in PROFILE.denoms if d.nexus == "€5"}.pop().match_keys()
+    keys_500 = {d for d in PROFILE.denoms if d.nexus == "€500"}.pop().match_keys()
+    assert "5" in keys_5 and "500" in keys_500
+    assert not keys_5 & keys_500
+
+
+def test_ambiguous_bare_value_alias_is_dropped():
+    """A bare face value shared by two currencies must not match either."""
+    from hardware.report_profile import profile_from_dict
+
+    mixed = profile_from_dict({
+        "name": "mixed",
+        "labels": {"totals": "Total"},
+        "denoms": [
+            {"device": "EUR 50", "nexus": "€50", "value": 50},
+            {"device": "USD 50", "nexus": "$50", "value": 50},
+        ],
+    })
+    assert mixed.match_denomination(["50", "3", "150.00"]) is None
+    assert mixed.match_denomination(["EUR", "50", "3"])[0].nexus == "€50"
+    assert mixed.match_denomination(["USD", "50", "3"])[0].nexus == "$50"
+
+
+@pytest.mark.parametrize("layout", LAYOUTS)
+def test_every_simulated_print_layout_parses(layout):
+    """The real C1's template is unknown, so cover the plausible variants."""
+    expected = sum(DEFAULT_BATCH.values())
+    r = parse_report(build_report(DEFAULT_BATCH, layout), PROFILE)
+    assert r.counted_quantity == expected
+    assert r.warnings == []
+    assert r.denominations["€500"] == DEFAULT_BATCH["EUR 500"]
+    assert r.denominations["€5"] == DEFAULT_BATCH["EUR 5"]
+
+
+def test_detect_profile_picks_a_working_profile():
+    profile, report = detect_profile(build_report(DEFAULT_BATCH, "standard"))
+    assert report.counted_quantity == sum(DEFAULT_BATCH.values())
+    assert report.warnings == []
+    assert profile.denoms
+
+
+def test_detect_profile_rejects_text_that_is_not_a_report():
+    with pytest.raises(ReportParseError):
+        detect_profile("SELF TEST PASSED\nFirmware 3.11\n")
 
 
 def test_profile_denominations_match_isa_plugin_config():

@@ -27,8 +27,14 @@ import time
 import serial  # pyserial
 
 from .base import CashCounter, CountResult
-from .config import COUNTER_BAUD_RATE, COUNTER_COM_PORT, COUNTER_PROFILE, COUNTER_STRICT
-from .report_parser import ReportParseError, parse_report
+from .config import (
+    COUNTER_AUTODETECT,
+    COUNTER_BAUD_RATE,
+    COUNTER_COM_PORT,
+    COUNTER_PROFILE,
+    COUNTER_STRICT,
+)
+from .report_parser import ReportParseError, detect_profile, parse_report
 from .report_profile import DeviceProfile, load_profile
 
 _PARITY = {"N": serial.PARITY_NONE, "E": serial.PARITY_EVEN, "O": serial.PARITY_ODD}
@@ -80,12 +86,7 @@ class GDC1ReportCounter(CashCounter):
         raw = self.read_raw_report(timeout_seconds)
         text = raw.decode(self._profile.encoding, errors="replace")
 
-        try:
-            report = parse_report(text, self._profile)
-        except ReportParseError as exc:
-            raise ReportParseError(
-                f"{exc}\n\nRaw report received:\n{text}"
-            ) from exc
+        report = self._parse(text)
 
         if report.warnings:
             for warning in report.warnings:
@@ -102,6 +103,42 @@ class GDC1ReportCounter(CashCounter):
         return CountResult(denominations=report.denominations, raw_response=raw)
 
     # ── internals ─────────────────────────────────────────────────────────────
+
+    def _parse(self, text: str):
+        """Parse with the configured profile, falling back to detection.
+
+        A machine whose print template differs from the configured profile is
+        the most likely first-run problem on a new site. Rather than fail
+        outright, try the other installed profiles — but only accept one whose
+        printed totals agree with its own denomination lines, and say loudly
+        which profile was used so the .env can be corrected.
+        """
+        try:
+            return parse_report(text, self._profile)
+        except ReportParseError as exc:
+            if not COUNTER_AUTODETECT:
+                raise ReportParseError(f"{exc}\n\nRaw report received:\n{text}") from exc
+
+            try:
+                profile, report = detect_profile(text)
+            except ReportParseError:
+                raise ReportParseError(
+                    f"{exc}\n\nNo other installed profile matched either.\n"
+                    f"Raw report received:\n{text}"
+                ) from exc
+
+            if report.warnings:
+                raise ReportParseError(
+                    f"{exc}\n\nProfile {profile.name!r} came closest but its "
+                    f"totals disagree: {'; '.join(report.warnings)}\n"
+                    f"Raw report received:\n{text}"
+                ) from exc
+
+            print(
+                f"[C1Report] Profile {self._profile.name!r} did not match this "
+                f"report; {profile.name!r} did. Set COUNTER_PROFILE accordingly."
+            )
+            return report
 
     def read_raw_report(self, timeout_seconds: int = 120) -> bytes:
         """Block until a full report burst has been received.
@@ -132,14 +169,18 @@ class GDC1ReportCounter(CashCounter):
                 return bytes(buf)
 
             if now >= deadline:
-                if buf:
+                # Anything shorter than a plausible report is line noise, not a
+                # truncated count — report it as silence rather than letting the
+                # parser fail on it, which would hide the real problem.
+                if len(buf) >= profile.min_report_bytes:
                     print(
                         f"[C1Report] Timeout with {len(buf)} bytes buffered; "
                         "parsing what arrived."
                     )
                     return bytes(buf)
+                noise = f" Received {len(buf)} stray byte(s)." if buf else ""
                 raise TimeoutError(
-                    f"No report received within {timeout_seconds}s. Check that the "
-                    "C1 report output is routed to the serial port and that the "
+                    f"No report received within {timeout_seconds}s.{noise} Check that "
+                    "the C1 report output is routed to the serial port and that the "
                     "cable and line settings match the device profile."
                 )

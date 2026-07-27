@@ -17,3 +17,7 @@ COUNTER_BAUD_RATE: int = int(os.getenv("COUNTER_BAUD_RATE", "0") or 0)
 # When true, a report whose own totals disagree with its denomination lines is
 # rejected instead of accepted with a warning. Recommended in production.
 COUNTER_STRICT: bool = os.getenv("COUNTER_STRICT", "true").lower() in {"1", "true", "yes"}
+
+# If the configured profile cannot parse a report, try the other installed
+# profiles and accept one only if its totals agree with its own rows.
+COUNTER_AUTODETECT: bool = os.getenv("COUNTER_AUTODETECT", "true").lower() in {"1", "true", "yes"}
