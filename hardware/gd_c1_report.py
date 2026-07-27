@@ -9,12 +9,13 @@ Framing is by idle time. The machine streams the whole report in one burst;
 once the line has been quiet for `idle_timeout_seconds` the report is complete.
 
 Machine-side setup:
-  * Configure the C1's report/printer output to the serial interface using the
+  * Configure the C1's report/printer output to a serial interface using the
     line settings in the device profile (115200 8N1, no handshake by default).
-  * Use COM1 or another free port — COM2 on the C1 is the barcode reader.
-  * Connect with a null-modem cable to the host PC.
+  * Connect that interface to the host PC with a null-modem cable.
 
-Host-side setup (.env):
+Host-side setup (.env). COUNTER_COM_PORT is the port name on the PC, which has
+nothing to do with which physical socket is used on the machine:
+
   COUNTER_MODE=c1_report
   COUNTER_COM_PORT=COM3
   COUNTER_PROFILE=bps_c1_eur
@@ -57,10 +58,10 @@ def _open_failure_message(port_name: str, exc: Exception) -> str:
             "A serial port has exactly one owner. If ISA is running on this PC "
             "it holds the machine's printer port open for as long as its BPS C1 "
             "plugin is loaded, which locks Nexus out.\n"
-            "Options: close ISA, point Nexus at a different port on the machine "
-            "(not COM2 — that is the barcode reader), run Nexus on a separate "
-            "PC, or split the line with a passive Y-cable so both hosts receive "
-            "the same printout.\n"
+            "Options: close ISA, give the machine a second report output on "
+            "another interface if its firmware supports one, run Nexus on a "
+            "separate PC, or split the line with a passive Y-cable so both "
+            "hosts receive the same printout.\n"
             f"Original error: {detail}"
         )
 

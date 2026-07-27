@@ -100,8 +100,13 @@ batch report the machine prints. Nexus never sends the machine a command — it
 only listens. This is the same approach the ISA device plugin uses.
 
 **1. Configure the machine.** On the C1's operator panel, route report/printer
-output to the serial interface at **115200 8N1, no handshake**. Use COM1 or
-another free port — COM2 on the C1 is the barcode reader.
+output to a serial interface at **115200 8N1, no handshake** (the settings ISA
+uses, taken from its plugin config).
+
+Note that `COUNTER_COM_PORT` and the `port` value in ISA's plugin config are
+both **PC-side** Windows port names. Neither says anything about which physical
+socket on the C1 is in use, or how many serial interfaces the machine has —
+consult the C1's own interface menu or G+D documentation for that.
 
 **2. Wire it up.** Null-modem cable from the C1's serial port to the PC. If the
 PC has no RS232 port, use a USB-to-serial adapter (FTDI or Prolific chipset).
@@ -198,7 +203,7 @@ either. Only the ownership conflict has to be resolved:
 | Option | Both keep working? | Effort |
 |---|---|---|
 | Close ISA while using Nexus | No — one at a time | none |
-| Second serial port on the C1 (**not COM2 — barcode reader**) | Yes | machine config |
+| Second report output on another C1 interface, if the firmware allows one | Yes | machine config |
 | Passive Y-cable tap on the C1's transmit line | Yes | a cable |
 | Nexus on a separate PC, own cable | Yes | a PC and a cable |
 
