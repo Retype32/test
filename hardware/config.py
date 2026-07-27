@@ -3,13 +3,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Which driver to use: "tcp" | "serial" | "mock"
+# Which driver to use: "c1_report" | "mock" | "none"
 COUNTER_MODE: str = os.getenv("COUNTER_MODE", "none").lower()
 
-# TCP / LAN settings (used when COUNTER_MODE=tcp)
-COUNTER_HOST: str = os.getenv("COUNTER_HOST", "192.168.1.100")
-COUNTER_PORT: int = int(os.getenv("COUNTER_PORT", "4000"))
+# Device profile describing the machine's report layout.
+# Either a name under hardware/profiles/ or a path to a .json file.
+COUNTER_PROFILE: str = os.getenv("COUNTER_PROFILE", "bps_c1_eur")
 
-# RS232 serial settings (used when COUNTER_MODE=serial)
-COUNTER_COM_PORT: str = os.getenv("COUNTER_COM_PORT", "COM3")
-COUNTER_BAUD_RATE: int = int(os.getenv("COUNTER_BAUD_RATE", "9600"))
+# RS232 settings. Blank falls back to the values in the device profile.
+COUNTER_COM_PORT: str = os.getenv("COUNTER_COM_PORT", "")
+COUNTER_BAUD_RATE: int = int(os.getenv("COUNTER_BAUD_RATE", "0") or 0)
+
+# When true, a report whose own totals disagree with its denomination lines is
+# rejected instead of accepted with a warning. Recommended in production.
+COUNTER_STRICT: bool = os.getenv("COUNTER_STRICT", "true").lower() in {"1", "true", "yes"}

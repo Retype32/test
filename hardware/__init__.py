@@ -4,12 +4,9 @@ from .config import COUNTER_MODE
 
 def get_counter() -> CashCounter:
     """Return the configured CashCounter implementation."""
-    if COUNTER_MODE == "tcp":
-        from .gd_c1_tcp import GDC1TcpCounter
-        return GDC1TcpCounter()
-    if COUNTER_MODE == "serial":
-        from .gd_c1_serial import GDC1SerialCounter
-        return GDC1SerialCounter()
+    if COUNTER_MODE in {"c1_report", "serial"}:
+        from .gd_c1_report import GDC1ReportCounter
+        return GDC1ReportCounter()
     if COUNTER_MODE == "mock":
         from .mock import MockCounter
         return MockCounter()
@@ -17,7 +14,7 @@ def get_counter() -> CashCounter:
         raise ConnectionError("No cash counter configured. Enter counts manually.")
     raise ValueError(
         f"Unknown COUNTER_MODE={COUNTER_MODE!r}. "
-        "Set COUNTER_MODE to 'tcp', 'serial', 'mock', or 'none' in .env."
+        "Set COUNTER_MODE to 'c1_report', 'mock', or 'none' in .env."
     )
 
 

@@ -38,9 +38,16 @@ DATABASE_URL_COMPLETE=sqlite+aiosqlite:///./catalog_complete.db
 DATABASE_URL_ESNF=sqlite+aiosqlite:///./catalog_esnf.db
 SECRET_KEY=brinks-nexus-super-secret-key-change-in-production-2026
 SESSION_COOKIE_SECURE=false
+
+COUNTER_MODE=mock
+COUNTER_PROFILE=bps_c1_eur
+COUNTER_COM_PORT=COM3
+COUNTER_STRICT=true
 ```
 
 **`SESSION_COOKIE_SECURE`** guards the web portal's login cookie — leave it `false` for local/LAN HTTP use, set it `true` once the portal is served over HTTPS.
+
+**`COUNTER_MODE`** selects the banknote counter driver: `mock` for development, `c1_report` for a real G+D BPS C1, or `none` to force manual entry. See [Connecting a BPS C1](#connecting-a-bps-c1) below.
 
 ---
 
@@ -85,6 +92,61 @@ After logging in, you'll be asked to pick a **Processing Catalog** (VMS / Brink'
 
 ---
 
+## Connecting a BPS C1
+
+The G+D BPS C1 has no host command API. It drives a serial receipt printer, and
+integration works by connecting the PC to that printer port and parsing the
+batch report the machine prints. Nexus never sends the machine a command — it
+only listens. This is the same approach the ISA device plugin uses.
+
+**1. Configure the machine.** On the C1's operator panel, route report/printer
+output to the serial interface at **115200 8N1, no handshake**. Use COM1 or
+another free port — COM2 on the C1 is the barcode reader.
+
+**2. Wire it up.** Null-modem cable from the C1's serial port to the PC. Note
+which COM port Windows assigns (Device Manager → Ports).
+
+**3. Capture a real report before trusting anything.** The printed layout
+varies by firmware and print template, so confirm it rather than assuming:
+
+```bash
+python -m hardware.capture --port COM3 --baud 115200
+```
+
+Run a small test batch on the machine and end it so it prints. Everything
+received is written to `reports/captures/`. Press Ctrl+C to stop.
+
+**4. Tune the profile.** Check the capture against the shipped profile:
+
+```bash
+python -m hardware.capture --parse reports/captures/c1-<timestamp>.txt
+```
+
+If denomination lines aren't recognised, edit `hardware/profiles/bps_c1_eur.json`
+so the `device` names and `labels` match exactly what the machine prints. The
+profile is data, not code — it can be corrected on site. Add the capture to
+`tests/test_c1_report_parser.py` as a regression test once it parses cleanly.
+
+**5. Switch the driver on** in `.env`:
+
+```env
+COUNTER_MODE=c1_report
+COUNTER_COM_PORT=COM3
+COUNTER_PROFILE=bps_c1_eur
+COUNTER_STRICT=true
+```
+
+`COUNTER_STRICT=true` rejects any report whose printed totals disagree with the
+sum of its own denomination lines. Leave it on in production — a partially read
+report is the main failure mode of printer-port integration, and silently
+accepting one would book a short count as a real one.
+
+**Adding another currency or machine:** copy an existing profile in
+`hardware/profiles/`, adjust the denominations and labels, and point
+`COUNTER_PROFILE` at it. No code changes are needed.
+
+---
+
 ## Project Structure
 
 ```text
@@ -108,8 +170,14 @@ BrinksNexus/
 │   └── static/css/theme.css — Portal color palette/stylesheet
 ├── reports/
 │   └── report_engine.py    — Excel + CSV export engine
-├── hardware/                — Banknote counter drivers (serial/TCP/mock), invoked from
-│                               web/routes/transaction_entry_web.py
+├── hardware/                — Banknote counter drivers, invoked from
+│   │                           web/routes/transaction_entry_web.py
+│   ├── gd_c1_report.py      — G+D BPS C1 serial report driver
+│   ├── report_parser.py     — Parses a machine's printed batch report into counts
+│   ├── report_profile.py    — Device profile loader
+│   ├── profiles/            — Per-machine report layouts (JSON, editable on site)
+│   ├── capture.py           — Raw serial capture / offline replay tool
+│   └── mock.py              — Development mock, no hardware required
 ├── run_backend.py           — Backend + web portal server launcher
 ├── start.bat                — Windows launcher (starts the backend, prints the portal URL)
 ├── requirements.txt
