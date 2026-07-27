@@ -103,8 +103,16 @@ only listens. This is the same approach the ISA device plugin uses.
 output to the serial interface at **115200 8N1, no handshake**. Use COM1 or
 another free port — COM2 on the C1 is the barcode reader.
 
-**2. Wire it up.** Null-modem cable from the C1's serial port to the PC. Note
-which COM port Windows assigns (Device Manager → Ports).
+**2. Wire it up.** Null-modem cable from the C1's serial port to the PC. If the
+PC has no RS232 port, use a USB-to-serial adapter (FTDI or Prolific chipset).
+Confirm Windows sees it:
+
+```bash
+python -m hardware.capture --list-ports
+```
+
+If that prints nothing, the cable or adapter is the problem — stop and fix it
+before going further, because every later step depends on it.
 
 **3. Capture a real report before trusting anything.** The printed layout
 varies by firmware and print template, so confirm it rather than assuming:

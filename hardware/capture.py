@@ -6,6 +6,7 @@ Everything the machine sends is written verbatim to a .bin file (and, decoded,
 to a .txt file) so the exact report layout can be inspected and the device
 profile tuned to match. It makes no assumptions and sends nothing.
 
+    python -m hardware.capture --list-ports        # which COM port?
     python -m hardware.capture --port COM3 --baud 115200
 
 Then run a small test batch on the machine and end it so it prints. Press
@@ -24,6 +25,30 @@ import sys
 from pathlib import Path
 
 DEFAULT_DIR = Path(__file__).resolve().parent.parent / "reports" / "captures"
+
+
+def list_ports() -> int:
+    """Show the serial ports Windows can see, so the right one can be picked."""
+    from serial.tools import list_ports as lp
+
+    ports = sorted(lp.comports(), key=lambda p: p.device)
+    if not ports:
+        print("No serial ports found on this PC.")
+        print()
+        print("This machine has no RS232 port and no USB-to-serial adapter")
+        print("attached. You need one of:")
+        print("  - a built-in RS232 port (older desktops / industrial PCs), or")
+        print("  - a USB-to-serial adapter (FTDI or Prolific chipset), plus")
+        print("  - a null-modem cable from the machine's printer port.")
+        return 1
+
+    print(f"{len(ports)} serial port(s) found:\n")
+    for p in ports:
+        print(f"  {p.device:<8} {p.description}")
+        if p.hwid and p.hwid != "n/a":
+            print(f"           {p.hwid}")
+    print("\nSet COUNTER_COM_PORT in .env to the port the machine is wired to.")
+    return 0
 
 
 def _hexdump(data: bytes, width: int = 16) -> str:
@@ -123,8 +148,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--outdir", type=Path, default=DEFAULT_DIR, help="where to write captures")
     ap.add_argument("--parse", type=Path, help="parse an existing capture instead of listening")
     ap.add_argument("--profile", default="bps_c1_eur", help="device profile to parse with")
+    ap.add_argument("--list-ports", action="store_true", help="list available serial ports and exit")
     args = ap.parse_args(argv)
 
+    if args.list_ports:
+        return list_ports()
     if args.parse:
         return parse_file(args.parse, args.profile, args.encoding)
     return capture(args.port, args.baud, args.encoding, args.outdir)
