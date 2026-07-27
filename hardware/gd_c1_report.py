@@ -42,6 +42,39 @@ _STOPBITS = {1: serial.STOPBITS_ONE, 1.5: serial.STOPBITS_ONE_POINT_FIVE, 2: ser
 _BYTESIZE = {5: serial.FIVEBITS, 6: serial.SIXBITS, 7: serial.SEVENBITS, 8: serial.EIGHTBITS}
 
 
+def _open_failure_message(port_name: str, exc: Exception) -> str:
+    """Explain a failed port open in terms of what actually goes wrong on site.
+
+    Windows reports a port that another program already owns as a bare
+    "Access is denied", which gives no hint that ISA is usually the owner.
+    """
+    detail = str(exc)
+    lowered = detail.lower()
+
+    if "access is denied" in lowered or "permission" in lowered:
+        return (
+            f"Serial port {port_name} is already in use by another program.\n"
+            "A serial port has exactly one owner. If ISA is running on this PC "
+            "it holds the machine's printer port open for as long as its BPS C1 "
+            "plugin is loaded, which locks Nexus out.\n"
+            "Options: close ISA, point Nexus at a different port on the machine "
+            "(not COM2 — that is the barcode reader), run Nexus on a separate "
+            "PC, or split the line with a passive Y-cable so both hosts receive "
+            "the same printout.\n"
+            f"Original error: {detail}"
+        )
+
+    if "could not open port" in lowered or "filenotfound" in lowered:
+        return (
+            f"Serial port {port_name} does not exist on this PC.\n"
+            "Run 'python -m hardware.capture --list-ports' to see the available "
+            "ports, then set COUNTER_COM_PORT in .env to the right one.\n"
+            f"Original error: {detail}"
+        )
+
+    return f"Cannot open serial port {port_name} — {detail}"
+
+
 class GDC1ReportCounter(CashCounter):
     """Reads BPS C1 batch reports from the machine's serial printer port."""
 
@@ -70,7 +103,7 @@ class GDC1ReportCounter(CashCounter):
             )
         except serial.SerialException as exc:
             self._port = None
-            raise ConnectionError(f"Cannot open serial port {port_name} — {exc}") from exc
+            raise ConnectionError(_open_failure_message(port_name, exc)) from exc
 
         self._port.reset_input_buffer()
         print(f"[C1Report] Listening on {port_name} at {baud} baud ({self._profile.name}).")

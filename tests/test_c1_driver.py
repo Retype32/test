@@ -127,6 +127,35 @@ def test_non_strict_mode_accepts_a_mismatched_report_with_a_warning(monkeypatch)
     assert result.denominations == {"€50": 10}
 
 
+def test_busy_port_error_names_isa_as_the_likely_owner(monkeypatch):
+    """The common on-site failure: ISA already owns the machine's port."""
+    import serial
+
+    def refuse(*_a, **_kw):
+        raise serial.SerialException(
+            "could not open port 'COM3': PermissionError(13, 'Access is denied.', None, 5)"
+        )
+
+    monkeypatch.setattr(serial, "Serial", refuse)
+    with pytest.raises(ConnectionError) as exc:
+        GDC1ReportCounter(profile=PROFILE).connect()
+
+    message = str(exc.value)
+    assert "ISA" in message
+    assert "already in use" in message
+
+
+def test_missing_port_error_points_at_list_ports(monkeypatch):
+    import serial
+
+    def missing(*_a, **_kw):
+        raise serial.SerialException("could not open port 'COM9': FileNotFoundError(2)")
+
+    monkeypatch.setattr(serial, "Serial", missing)
+    with pytest.raises(ConnectionError, match="list-ports"):
+        GDC1ReportCounter(profile=PROFILE).connect()
+
+
 def test_denomination_keys_match_the_web_form_fields():
     """The parser's output keys feed the transaction entry page directly."""
     from web.routes.transaction_entry_web import DENOM_FIELDS

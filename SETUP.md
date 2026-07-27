@@ -184,18 +184,32 @@ the other. Nexus then behaves exactly as it will with a real C1:
 python -m hardware.simulate --port COM5 --repeat 3
 ```
 
-### Sharing the port with ISA
+### Running on a PC that already has ISA
 
-A serial port has one owner: whichever program opens it first locks the other
-out. If ISA already reads the C1's printer port on the same PC, Nexus cannot
-also open it. Options are to use a different free port on the machine (**not
-COM2 — that's the barcode reader**), to run Nexus on a separate PC, or to tap
-the line passively with a Y-cable so both hosts receive the same printout.
+**Nexus will not open the port while ISA is running.** A serial port has exactly
+one owner, and ISA's BPS C1 plugin opens the machine's printer port when the
+plugin loads and holds it until the plugin unloads. Nexus will fail at
+`connect()` with "already in use".
+
+The upside is that such a PC is already fully configured: the C1 is provably
+printing its report to serial, at known line settings, or ISA could not read it
+either. Only the ownership conflict has to be resolved:
+
+| Option | Both keep working? | Effort |
+|---|---|---|
+| Close ISA while using Nexus | No — one at a time | none |
+| Second serial port on the C1 (**not COM2 — barcode reader**) | Yes | machine config |
+| Passive Y-cable tap on the C1's transmit line | Yes | a cable |
+| Nexus on a separate PC, own cable | Yes | a PC and a cable |
+
+Closing ISA is the right way to prove the integration works the first time.
+Decide on a permanent arrangement afterwards.
 
 The passive tap works only because this driver is listen-only — it never
 transmits a byte, so it cannot corrupt ISA's data or disturb the machine. That
 is enforced by a test (`test_driver_never_writes_to_the_port`). Get sign-off
-from whoever owns the ISA installation before touching production cabling.
+from whoever owns the ISA installation before closing it or touching production
+cabling.
 
 ---
 
