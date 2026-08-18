@@ -108,3 +108,86 @@ async def test_admin_can_deactivate_another_user(api_client, tokens):
     )
     assert r.status_code == 200
     assert r.json()["is_active"] is False
+
+
+async def test_admin_can_edit_username_password_and_role(api_client, tokens):
+    create = await api_client.post(
+        "/api/v1/auth/users",
+        json={"username": "testuser_edit", "password": "testpass123", "role": "cashier"},
+        headers=_headers(tokens["admin"]),
+    )
+    user_id = create.json()["id"]
+
+    r = await api_client.patch(
+        f"/api/v1/auth/users/{user_id}",
+        json={"username": "testuser_edited", "password": "newpass456", "role": "supervisor"},
+        headers=_headers(tokens["admin"]),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["username"] == "testuser_edited"
+    assert body["role"] == "supervisor"
+
+    # The new password actually works, and the old one no longer does.
+    login_new = await api_client.post(
+        "/api/v1/auth/login", json={"username": "testuser_edited", "password": "newpass456"}
+    )
+    assert login_new.status_code == 200
+    login_old = await api_client.post(
+        "/api/v1/auth/login", json={"username": "testuser_edited", "password": "testpass123"}
+    )
+    assert login_old.status_code == 401
+
+
+async def test_edit_to_duplicate_username_rejected(api_client, tokens):
+    create = await api_client.post(
+        "/api/v1/auth/users",
+        json={"username": "testuser_dupe_target", "password": "testpass123", "role": "cashier"},
+        headers=_headers(tokens["admin"]),
+    )
+    user_id = create.json()["id"]
+
+    r = await api_client.patch(
+        f"/api/v1/auth/users/{user_id}",
+        json={"username": "admin"},
+        headers=_headers(tokens["admin"]),
+    )
+    assert r.status_code == 400
+    assert "already exists" in r.json()["detail"]
+
+
+async def test_admin_cannot_change_own_role(api_client, tokens):
+    r = await api_client.get("/api/v1/auth/users", headers=_headers(tokens["admin"]))
+    admin_id = next(u["id"] for u in r.json() if u["username"] == "admin")
+
+    r2 = await api_client.patch(
+        f"/api/v1/auth/users/{admin_id}",
+        json={"role": "cashier"},
+        headers=_headers(tokens["admin"]),
+    )
+    assert r2.status_code == 400
+    assert "own role" in r2.json()["detail"]
+
+
+async def test_admin_cannot_delete_own_account(api_client, tokens):
+    r = await api_client.get("/api/v1/auth/users", headers=_headers(tokens["admin"]))
+    admin_id = next(u["id"] for u in r.json() if u["username"] == "admin")
+
+    r2 = await api_client.delete(f"/api/v1/auth/users/{admin_id}", headers=_headers(tokens["admin"]))
+    assert r2.status_code == 400
+    assert "own account" in r2.json()["detail"]
+
+
+async def test_admin_can_delete_another_user(api_client, tokens):
+    create = await api_client.post(
+        "/api/v1/auth/users",
+        json={"username": "testuser_delete", "password": "testpass123", "role": "cashier"},
+        headers=_headers(tokens["admin"]),
+    )
+    user_id = create.json()["id"]
+
+    r = await api_client.delete(f"/api/v1/auth/users/{user_id}", headers=_headers(tokens["admin"]))
+    assert r.status_code == 204
+
+    listed = await api_client.get("/api/v1/auth/users", headers=_headers(tokens["admin"]))
+    assert not any(u["id"] == user_id for u in listed.json())

@@ -1,7 +1,7 @@
 import uuid
 from fastapi import APIRouter, HTTPException, status
 from ...services.auth_service import AuthService
-from ...schemas.user import LoginRequest, TokenResponse, UserCreate, UserResponse, UserActiveUpdate
+from ...schemas.user import LoginRequest, TokenResponse, UserCreate, UserUpdate, UserResponse, UserActiveUpdate
 from ..deps import AdminOnly, CoreDB
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -56,4 +56,34 @@ async def set_user_active(
         return UserResponse.model_validate(user)
     except ValueError as e:
         status_code = 400 if "your own account" in str(e) else 404
+        raise HTTPException(status_code=status_code, detail=str(e))
+
+
+@router.patch("/users/{user_id}", response_model=UserResponse)
+async def update_user(
+    user_id: uuid.UUID,
+    data: UserUpdate,
+    db: CoreDB,
+    admin: AdminOnly,
+):
+    service = AuthService(db)
+    try:
+        user = await service.update_user(user_id, data, admin.id)
+        return UserResponse.model_validate(user)
+    except ValueError as e:
+        status_code = 404 if "not found" in str(e) else 400
+        raise HTTPException(status_code=status_code, detail=str(e))
+
+
+@router.delete("/users/{user_id}", status_code=204)
+async def delete_user(
+    user_id: uuid.UUID,
+    db: CoreDB,
+    admin: AdminOnly,
+):
+    service = AuthService(db)
+    try:
+        await service.delete_user(user_id, admin.id)
+    except ValueError as e:
+        status_code = 404 if "not found" in str(e) else 400
         raise HTTPException(status_code=status_code, detail=str(e))

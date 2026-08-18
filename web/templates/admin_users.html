@@ -37,9 +37,10 @@
     <div class="card-header">STAFF ({{ users|length }})</div>
     <div class="card-body" style="padding:0;">
         <table class="data">
-            <thead><tr><th>Username</th><th>Role</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Username</th><th>Role</th><th>Status</th><th style="width:320px;"></th></tr></thead>
             <tbody>
             {% for u in users %}
+            {% set is_self = u.username == user.username %}
             <tr>
                 <td>{{ u.username }}</td>
                 <td>{{ u.role.value }}</td>
@@ -48,14 +49,54 @@
                     {% else %}<span class="badge badge-error">Disabled</span>{% endif %}
                 </td>
                 <td>
-                    {% if u.username == user.username and u.is_active %}
-                    <span class="text-muted">(you)</span>
-                    {% else %}
-                    <form method="post" action="/web/admin/users/{{ u.id }}/active">
-                        <input type="hidden" name="is_active" value="{{ 'false' if u.is_active else 'true' }}">
-                        <button class="btn btn-sm" type="submit">{{ "Deactivate" if u.is_active else "Activate" }}</button>
+                    <div class="btn-group">
+                        <button type="button" class="btn btn-sm" onclick="toggleEdit('{{ u.id }}')">Edit</button>
+                        {% if is_self %}
+                        <span class="text-muted">(you)</span>
+                        {% else %}
+                        <form method="post" action="/web/admin/users/{{ u.id }}/active">
+                            <input type="hidden" name="is_active" value="{{ 'false' if u.is_active else 'true' }}">
+                            <button class="btn btn-sm" type="submit">{{ "Deactivate" if u.is_active else "Activate" }}</button>
+                        </form>
+                        <form method="post" action="/web/admin/users/{{ u.id }}/delete"
+                              onsubmit="return confirm('Remove {{ u.username }}? This cannot be undone.');">
+                            <button class="btn btn-sm btn-ghost" type="submit" style="color:var(--bad-fg);">Remove</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            <tr id="edit-row-{{ u.id }}" class="edit-row" hidden>
+                <td colspan="4">
+                    <form method="post" action="/web/admin/users/{{ u.id }}/edit" class="form-row" style="margin:0;">
+                        <div class="form-group">
+                            <label>Username</label>
+                            <input type="text" name="username" value="{{ u.username }}" required>
+                        </div>
+                        <div class="form-group">
+                            <label>New Password</label>
+                            <input type="password" name="password" placeholder="Leave blank to keep current">
+                        </div>
+                        <div class="form-group">
+                            <label>Role</label>
+                            {% if is_self %}
+                            <select disabled>
+                                <option>{{ u.role.value }} (can't change your own role)</option>
+                            </select>
+                            <input type="hidden" name="role" value="{{ u.role.value }}">
+                            {% else %}
+                            <select name="role">
+                                {% for r in roles %}
+                                <option value="{{ r }}" {% if r == u.role.value %}selected{% endif %}>{{ r }}</option>
+                                {% endfor %}
+                            </select>
+                            {% endif %}
+                        </div>
+                        <div class="form-group">
+                            <button class="btn btn-primary btn-sm" type="submit">Save</button>
+                            <button class="btn btn-sm btn-ghost" type="button" onclick="toggleEdit('{{ u.id }}')">Cancel</button>
+                        </div>
                     </form>
-                    {% endif %}
                 </td>
             </tr>
             {% endfor %}
@@ -64,4 +105,13 @@
     </div>
 </div>
 
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleEdit(userId) {
+    var row = document.getElementById("edit-row-" + userId);
+    if (row) row.hidden = !row.hidden;
+}
+</script>
 {% endblock %}

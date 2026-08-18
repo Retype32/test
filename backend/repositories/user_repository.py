@@ -34,3 +34,32 @@ class UserRepository:
             user.is_active = is_active
             await self.db.flush()
         return user
+
+    async def update(
+        self, user_id: uuid.UUID, username: Optional[str] = None, role: Optional[UserRole] = None
+    ) -> Optional[User]:
+        user = await self.get_by_id(user_id)
+        if not user:
+            return None
+        if username is not None:
+            user.username = username
+        if role is not None:
+            user.role = role
+        await self.db.flush()
+        await self.db.refresh(user)
+        return user
+
+    async def update_password(self, user_id: uuid.UUID, password_hash: str) -> Optional[User]:
+        user = await self.get_by_id(user_id)
+        if user:
+            user.password_hash = password_hash
+            await self.db.flush()
+        return user
+
+    async def delete(self, user_id: uuid.UUID) -> bool:
+        user = await self.get_by_id(user_id)
+        if not user:
+            return False
+        await self.db.delete(user)
+        await self.db.flush()
+        return True

@@ -25,19 +25,50 @@ async def test_admin_staff_management_and_self_lockout_guard(web_client):
     assert "created" in created.text
     assert "webtestuser" in created.text
 
-    # The success banner also mentions the username, before the actual table
-    # row -- rfind finds the row itself, which has the deactivate form.
-    idx = created.text.rfind("webtestuser")
-    snippet = created.text[idx : idx + 600]
-    form_match = re.search(r'action="(/web/admin/users/[0-9a-f-]{36}/active)"', snippet)
-    assert form_match is not None
-    deactivate_url = form_match.group(1)
+    # The success banner mentions the username too, before the actual table
+    # row -- search from the STAFF card onward to land on the row itself,
+    # then pull the id off its Edit button (stable regardless of the other
+    # buttons' order/markup around it).
+    table_start = created.text.index("STAFF (")
+    row_idx = created.text.index("webtestuser", table_start)
+    row_snippet = created.text[row_idx : row_idx + 400]
+    id_match = re.search(r"toggleEdit\('([0-9a-f-]{36})'\)", row_snippet)
+    assert id_match is not None
+    user_id = id_match.group(1)
 
-    deactivated = await web_client.post(deactivate_url, data={"is_active": "false"}, follow_redirects=True)
+    deactivated = await web_client.post(
+        f"/web/admin/users/{user_id}/active", data={"is_active": "false"}, follow_redirects=True
+    )
     assert "Disabled" in deactivated.text
 
     # Admin's own row shows "(you)" instead of a deactivate button.
     assert "(you)" in deactivated.text
+
+    edited = await web_client.post(
+        f"/web/admin/users/{user_id}/edit",
+        data={"username": "webtestuser2", "password": "", "role": "supervisor"},
+        follow_redirects=True,
+    )
+    assert "updated" in edited.text
+    assert "webtestuser2" in edited.text
+    assert "supervisor" in edited.text
+
+    removed = await web_client.post(f"/web/admin/users/{user_id}/delete", follow_redirects=True)
+    assert "removed" in removed.text.lower()
+    assert "webtestuser2" not in removed.text
+
+
+async def test_admin_cannot_delete_own_account_via_web(web_client, api_client, tokens):
+    await web_client.post("/web/login", data={"username": "admin", "password": "admin"})
+    await web_client.post("/web/catalog/select", data={"code": "vms"})
+
+    users = await api_client.get(
+        "/api/v1/auth/users", headers={"Authorization": f"Bearer {tokens['admin']}"}
+    )
+    admin_id = next(u["id"] for u in users.json() if u["username"] == "admin")
+
+    resp = await web_client.post(f"/web/admin/users/{admin_id}/delete", follow_redirects=True)
+    assert "own account" in resp.text
 
 
 async def test_admin_eod_close_and_reopen_via_web(web_client):

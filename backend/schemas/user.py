@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Optional
 from pydantic import BaseModel, Field
 from ..models.user import UserRole
 
@@ -12,6 +13,12 @@ class UserCreate(BaseModel):
 
 class UserActiveUpdate(BaseModel):
     is_active: bool
+
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = Field(None, min_length=3, max_length=100)
+    password: Optional[str] = Field(None, min_length=4)
+    role: Optional[UserRole] = None
 
 
 class UserResponse(BaseModel):
