@@ -211,6 +211,66 @@ def test_detect_profile_rejects_text_that_is_not_a_report():
         detect_profile("SELF TEST PASSED\nFirmware 3.11\n")
 
 
+def test_subtotal_with_only_a_money_figure_is_not_read_as_a_quantity():
+    """Real BPS C1 printouts show "SubTotal 490" -- one figure, and it's money."""
+    text = """
+Currency  EUR
+EUR 20       10        200.00
+EUR 10       15        150.00
+SubTotal    350.00
+Total        25        350.00
+"""
+    r = parse_report(text, PROFILE)
+    assert r.subtotal_quantity is None
+    assert r.subtotal_value == Decimal("350.00")
+    assert r.warnings == []
+
+
+def test_coin_line_is_captured_and_included_in_the_total():
+    text = """
+Currency  EUR
+EUR 20       10        200.00
+Coin 5.00
+Total        10        205.00
+"""
+    r = parse_report(text, PROFILE)
+    assert r.coin_amount == Decimal("5.00")
+    assert r.counted_note_value == Decimal("200.00")
+    assert r.counted_value == Decimal("205.00")
+    assert r.warnings == []
+
+
+def test_missing_coin_line_does_not_affect_totals():
+    r = parse_report(BASIC, PROFILE)
+    assert r.coin_amount == Decimal("0")
+
+
+def test_subtotal_mismatch_is_reported():
+    text = """
+Currency  EUR
+EUR 20       10        200.00
+SubTotal    999.00
+Total        10        200.00
+"""
+    r = parse_report(text, PROFILE)
+    assert any("Subtotal mismatch" in w for w in r.warnings)
+
+
+def test_report_metadata_labels_are_captured():
+    text = """
+NO:00002
+User ID : User1
+Machine SN : 315190
+Currency  EUR
+EUR 20       10        200.00
+Total        10        200.00
+"""
+    r = parse_report(text, PROFILE)
+    assert r.report_number == "00002"
+    assert r.user_id == "User1"
+    assert r.machine_serial_number == "315190"
+
+
 def test_profile_denominations_match_isa_plugin_config():
     """The ISA BPS C1 plugin config is the known-good machine configuration."""
     isa_codes = {

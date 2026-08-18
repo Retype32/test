@@ -156,6 +156,28 @@ def test_missing_port_error_points_at_list_ports(monkeypatch):
         GDC1ReportCounter(profile=PROFILE).connect()
 
 
+def test_end_marker_ends_the_report_without_waiting_out_the_idle_timeout():
+    """ESC i should short-circuit the wait; the idle timeout is only a fallback."""
+    import time as _time
+
+    data = _encoded() + b"\x1b\x69"
+    counter = _counter([data], idle=5)  # idle is deliberately much longer than this test
+    started = _time.monotonic()
+    result = counter.wait_for_count_result(timeout_seconds=10)
+    elapsed = _time.monotonic() - started
+
+    assert sum(result.denominations.values()) == EXPECTED_QTY
+    assert elapsed < 1.0
+
+
+def test_coin_amount_is_merged_into_denominations_as_coins():
+    text = "Currency EUR\r\nEUR 50   10   500.00\r\nCoin 5.00\r\nTotal 10   505.00\r\n"
+    counter = _counter([text.encode("cp437")])
+    result = counter.wait_for_count_result(timeout_seconds=5)
+    assert result.denominations["€50"] == 10
+    assert result.denominations["Coins"] == 5
+
+
 def test_denomination_keys_match_the_web_form_fields():
     """The parser's output keys feed the transaction entry page directly."""
     from web.routes.transaction_entry_web import DENOM_FIELDS

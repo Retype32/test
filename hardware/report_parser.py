@@ -31,11 +31,16 @@ class ParsedReport:
     values: dict[str, Decimal] = field(default_factory=dict)
     currency: str | None = None
     fitness_mode: str | None = None
+    coin_amount: Decimal = field(default_factory=lambda: Decimal("0"))
     total_quantity: int | None = None
     total_value: Decimal | None = None
     subtotal_quantity: int | None = None
     subtotal_value: Decimal | None = None
     reject_quantity: int = 0
+    report_number: str | None = None
+    user_id: str | None = None
+    machine_serial_number: str | None = None
+    batch_id: str | None = None
     warnings: list[str] = field(default_factory=list)
     unmatched_lines: list[str] = field(default_factory=list)
     raw_text: str = ""
@@ -45,8 +50,14 @@ class ParsedReport:
         return sum(self.denominations.values())
 
     @property
-    def counted_value(self) -> Decimal:
+    def counted_note_value(self) -> Decimal:
+        """Sum of the denomination rows only, excluding bulk coin."""
         return sum(self.values.values(), Decimal(0))
+
+    @property
+    def counted_value(self) -> Decimal:
+        """Denomination rows plus bulk coin -- what the machine's Total covers."""
+        return self.counted_note_value + self.coin_amount
 
     @property
     def is_reliable(self) -> bool:
@@ -96,6 +107,14 @@ def _clean_lines(text: str, profile: DeviceProfile) -> list[str]:
     return out
 
 
+_METADATA_LABELS = (
+    ("report_number", "report_number"),
+    ("user_id", "user_id"),
+    ("machine_serial", "machine_serial_number"),
+    ("batch_id", "batch_id"),
+)
+
+
 def _classify_line(line: str, profile: DeviceProfile, report: ParsedReport) -> None:
     lower = line.lower()
 
@@ -105,6 +124,18 @@ def _classify_line(line: str, profile: DeviceProfile, report: ParsedReport) -> N
 
     if _is_label_line(lower, profile.label("fitness")) and report.fitness_mode is None:
         report.fitness_mode = _label_value(line, profile.label("fitness"))
+        return
+
+    for label_key, attr in _METADATA_LABELS:
+        label = profile.label(label_key)
+        if label and _is_label_line(lower, label) and getattr(report, attr) is None:
+            setattr(report, attr, _label_value(line, label))
+            return
+
+    if _is_label_line(lower, profile.label("coin")):
+        numbers = _numbers_in(line, profile)
+        if numbers:
+            report.coin_amount = numbers[-1]
         return
 
     if profile.reject_keyword and profile.reject_keyword.lower() in lower:
@@ -134,6 +165,12 @@ def _classify_line(line: str, profile: DeviceProfile, report: ParsedReport) -> N
             numbers = _numbers_in(line, profile)
             if not numbers:
                 report.warnings.append(f"{key.capitalize()} line had no numbers: {line!r}")
+                return
+            if len(numbers) == 1 and key == "subtotals":
+                # A lone figure on a SubTotal line is a money total, not a
+                # count ("SubTotal 490") -- unlike Total, real BPS C1
+                # printouts never carry a piece count on this line.
+                setattr(report, val_attr, numbers[0])
                 return
             setattr(report, qty_attr, int(numbers[0]))
             if len(numbers) > 1:
@@ -288,5 +325,10 @@ def _validate_totals(report: ParsedReport) -> None:
     if report.total_value is not None and report.total_value != report.counted_value:
         report.warnings.append(
             f"Total value mismatch: report says {report.total_value}, "
-            f"denomination lines sum to {report.counted_value}."
+            f"denomination lines plus coin sum to {report.counted_value}."
+        )
+    if report.subtotal_value is not None and report.subtotal_value != report.counted_note_value:
+        report.warnings.append(
+            f"Subtotal mismatch: report says {report.subtotal_value}, "
+            f"denomination lines sum to {report.counted_note_value}."
         )

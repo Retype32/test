@@ -25,7 +25,12 @@
     "quantity": "Pcs",
     "value": "Amount",
     "subtotals": "SubTotal",
-    "totals": "Total"
+    "totals": "Total",
+    "coin": "Coin",
+    "report_number": "NO:",
+    "user_id": "User ID",
+    "machine_serial": "Machine SN",
+    "batch_id": "Batch ID"
   },
 
   "denoms": [

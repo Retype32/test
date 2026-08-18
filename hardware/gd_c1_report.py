@@ -24,6 +24,7 @@ nothing to do with which physical socket is used on the machine:
 from __future__ import annotations
 
 import time
+from decimal import ROUND_HALF_UP
 
 import serial  # pyserial
 
@@ -35,8 +36,14 @@ from .config import (
     COUNTER_PROFILE,
     COUNTER_STRICT,
 )
+from .escpos import strip_escpos
 from .report_parser import ReportParseError, detect_profile, parse_report
 from .report_profile import DeviceProfile, load_profile
+
+# ESC i -- the C1's usual report terminator. Finding it lets a report be
+# accepted immediately instead of always waiting out the idle timeout; the
+# idle timeout remains the fallback for firmware that omits it.
+_END_MARKER = b"\x1b\x69"
 
 _PARITY = {"N": serial.PARITY_NONE, "E": serial.PARITY_EVEN, "O": serial.PARITY_ODD}
 _STOPBITS = {1: serial.STOPBITS_ONE, 1.5: serial.STOPBITS_ONE_POINT_FIVE, 2: serial.STOPBITS_TWO}
@@ -98,14 +105,23 @@ class GDC1ReportCounter(CashCounter):
                 bytesize=_BYTESIZE[comms.bytesize],
                 parity=_PARITY[comms.parity.upper()],
                 stopbits=_STOPBITS[comms.stopbits],
+                xonxoff=False,
                 rtscts=comms.rtscts,
                 dsrdtr=comms.dsrdtr,
-                timeout=0.2,
+                timeout=0.10,
+                write_timeout=0.5,
             )
         except serial.SerialException as exc:
             self._port = None
             raise ConnectionError(_open_failure_message(port_name, exc)) from exc
 
+        # Some C1 units hold their report output back while RTS/DTR read
+        # asserted, since a plain listener never raises them itself. This is
+        # a read-only driver -- it never writes a command byte -- so forcing
+        # both low costs nothing and matches the wiring proven against a
+        # real machine.
+        self._port.rts = False
+        self._port.dtr = False
         self._port.reset_input_buffer()
         print(f"[C1Report] Listening on {port_name} at {baud} baud ({self._profile.name}).")
         return True
@@ -118,7 +134,10 @@ class GDC1ReportCounter(CashCounter):
 
     def wait_for_count_result(self, timeout_seconds: int = 120) -> CountResult:
         raw = self.read_raw_report(timeout_seconds)
-        text = raw.decode(self._profile.encoding, errors="replace")
+        # Byte-level cleanup first: raster/ESC-P blocks are binary and can
+        # only be skipped by the length their command header declares, which
+        # is lost once the stream has already been decoded as text.
+        text = strip_escpos(raw)
 
         report = self._parse(text)
 
@@ -133,8 +152,20 @@ class GDC1ReportCounter(CashCounter):
                 )
         if report.unmatched_lines:
             print(f"[C1Report] Unrecognised lines ignored: {report.unmatched_lines}")
+        if report.report_number:
+            print(f"[C1Report] Report {report.report_number} "
+                  f"(user {report.user_id or '?'}, machine SN {report.machine_serial_number or '?'})")
 
-        return CountResult(denominations=report.denominations, raw_response=raw)
+        denominations = dict(report.denominations)
+        if report.coin_amount:
+            # The wizard's "Coins" field is a bulk euro amount, not a piece
+            # count (TransactionService.DENOMINATION_VALUES["Coins"] == 1),
+            # so the coin total maps onto it directly.
+            denominations["Coins"] = int(
+                report.coin_amount.to_integral_value(rounding=ROUND_HALF_UP)
+            )
+
+        return CountResult(denominations=denominations, raw_response=raw)
 
     # ── internals ─────────────────────────────────────────────────────────────
 
@@ -195,6 +226,8 @@ class GDC1ReportCounter(CashCounter):
             if chunk:
                 buf.extend(chunk)
                 last_byte_at = now
+                if len(buf) >= profile.min_report_bytes and _END_MARKER in buf:
+                    return bytes(buf)
             elif (
                 last_byte_at is not None
                 and len(buf) >= profile.min_report_bytes

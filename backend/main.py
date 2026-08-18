@@ -1,3 +1,4 @@
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
@@ -6,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.exception_handlers import http_exception_handler
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
+from hardware import open_shared_counter, close_shared_counter
 from .core.config import settings
 from .core.database import init_databases, CoreSessionLocal
 from .api.routes import auth, customers, transactions, catalogs, eod, notifications, duplicates, stats
@@ -35,7 +37,9 @@ async def _auto_seed():
 async def lifespan(app: FastAPI):
     await init_databases()
     await _auto_seed()
+    await asyncio.to_thread(open_shared_counter)
     yield
+    close_shared_counter()
 
 
 app = FastAPI(
