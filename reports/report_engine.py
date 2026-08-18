@@ -115,7 +115,7 @@ def _build_row(t: dict) -> dict:
         "Customer Location":     t.get("location_name", ""),
         "Address1":              "",
         "Seal Number":           t.get("bag_number", ""),
-        "Wallet Number":         "",
+        "Wallet Number":         t.get("wallet_id") or "",
         "Lodgement Slip Number": "",
         "Operator Id":           t.get("username", ""),
         "Comments":              "",

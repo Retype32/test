@@ -25,6 +25,7 @@ class TransactionCreate(BaseModel):
     customer_id: str
     location_id: str
     bag_number: str = Field(..., min_length=1, max_length=100)
+    wallet_id: Optional[str] = Field(None, max_length=50)
     total_value: Decimal
     expected_total: Optional[Decimal] = None
     denominations: list[DenominationEntry]
@@ -37,6 +38,7 @@ class TransactionResponse(BaseModel):
     customer_id: str
     location_id: str
     bag_number: str
+    wallet_id: Optional[str] = None
     total_value: Decimal
     expected_total: Optional[Decimal] = None
     balance_status: BalanceStatus

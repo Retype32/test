@@ -1,0 +1,110 @@
+{% extends "wizard_base.html" %}
+{% block title %}New Transaction — Customer &amp; Location{% endblock %}
+{% block wizard_title %}Customer &amp; Location{% endblock %}
+{% block wizard_subtitle %}Scan or enter the Customer ID{% endblock %}
+{% block content %}
+
+<form method="post" action="/web/transactions/new/wizard/customer" id="customer-form">
+    <div class="form-group">
+        <label for="customer_id">Customer ID</label>
+        <input type="text" id="customer_id" name="customer_id" class="scan-input num"
+               maxlength="8" inputmode="numeric" autocomplete="off" placeholder="00000000"
+               autofocus required>
+        <span class="wizard-status" id="lookup-status"></span>
+    </div>
+
+    <div class="form-group" id="customer-name-row" style="display:none;">
+        <label>Customer</label>
+        <div class="wizard-readout" id="customer-name"></div>
+    </div>
+
+    <div class="form-group" id="location-group" style="display:none;">
+        <label for="location_id">Location</label>
+        <select id="location_id" name="location_id" required>
+            <option value="">&mdash; Select location &mdash;</option>
+        </select>
+    </div>
+
+    <div class="btn-group" style="margin-top:var(--s-5);">
+        <a href="/web/transactions/new/wizard/cancel" class="btn btn-ghost">Cancel</a>
+        <button type="submit" class="btn btn-primary btn-lg" id="continue-btn" disabled style="flex:1;">
+            Continue <span aria-hidden="true">&#9656;</span>
+        </button>
+    </div>
+</form>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const customerInput = document.getElementById("customer_id");
+const lookupStatus  = document.getElementById("lookup-status");
+const nameRow       = document.getElementById("customer-name-row");
+const nameEl        = document.getElementById("customer-name");
+const locationGroup = document.getElementById("location-group");
+const locationSelect= document.getElementById("location_id");
+const continueBtn   = document.getElementById("continue-btn");
+
+let lastLookedUp = "";
+
+function resetDownstream() {
+    nameRow.style.display = "none";
+    locationGroup.style.display = "none";
+    locationSelect.innerHTML = '<option value="">— Select location —</option>';
+    continueBtn.disabled = true;
+}
+
+async function lookupCustomer() {
+    const id = customerInput.value.trim();
+    if (!id) { lookupStatus.textContent = ""; lookupStatus.className = "wizard-status"; resetDownstream(); return; }
+    if (id === lastLookedUp) return;
+
+    lookupStatus.textContent = "Looking up…";
+    lookupStatus.className = "wizard-status";
+    resetDownstream();
+
+    try {
+        const resp = await fetch("/web/transactions/new/wizard/customer-lookup?customer_id=" + encodeURIComponent(id));
+        const data = await resp.json();
+        lastLookedUp = id;
+
+        if (!data.found) {
+            lookupStatus.textContent = data.error || "Customer not found.";
+            lookupStatus.className = "wizard-status bad";
+            return;
+        }
+
+        lookupStatus.textContent = "";
+        nameEl.textContent = data.customer_name + " (" + data.customer_id + ")";
+        nameRow.style.display = "";
+
+        data.locations.forEach(loc => {
+            const opt = document.createElement("option");
+            opt.value = loc.location_id;
+            opt.textContent = loc.location_id + " — " + loc.location_name;
+            locationSelect.appendChild(opt);
+        });
+        locationGroup.style.display = "";
+        locationSelect.focus();
+    } catch (e) {
+        lookupStatus.textContent = "Lookup failed — try again.";
+        lookupStatus.className = "wizard-status bad";
+    }
+}
+
+customerInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); lookupCustomer(); }
+});
+customerInput.addEventListener("blur", lookupCustomer);
+customerInput.addEventListener("input", () => {
+    // A fresh edit invalidates whatever was already looked up.
+    if (customerInput.value.trim() !== lastLookedUp) resetDownstream();
+});
+
+locationSelect.addEventListener("change", () => {
+    continueBtn.disabled = !locationSelect.value;
+});
+
+customerInput.focus();
+</script>
+{% endblock %}

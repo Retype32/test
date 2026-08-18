@@ -45,7 +45,9 @@
                 <th>Customer</th>
                 <th>Location</th>
                 <th>Bag Number</th>
-                <th class="num">Total</th>
+                <th class="num">Declared</th>
+                <th class="num">Counted</th>
+                <th class="num">Discrepancy</th>
                 <th>Status</th>
                 <th>Duplicate</th>
                 <th></th>
@@ -60,7 +62,22 @@
                 <td>{{ t.customer_id }}</td>
                 <td>{{ t.location_id }}</td>
                 <td>{{ t.bag_number }}</td>
+                <td class="num">{% if t.expected_total is not none %}&euro;{{ "%.2f"|format(t.expected_total) }}{% else %}<span class="text-faint">&mdash;</span>{% endif %}</td>
                 <td class="num">&euro;{{ "%.2f"|format(t.total_value) }}</td>
+                <td class="num">
+                    {% if t.expected_total is none %}
+                    <span class="text-faint">&mdash;</span>
+                    {% else %}
+                        {% set diff = t.total_value - t.expected_total %}
+                        {% if diff == 0 %}
+                        <span style="color:var(--ok-fg);">&euro;0.00</span>
+                        {% elif diff < 0 %}
+                        <span style="color:var(--bad-fg);">&minus;&euro;{{ "%.2f"|format(diff|abs) }}</span>
+                        {% else %}
+                        <span style="color:var(--warn-fg);">+&euro;{{ "%.2f"|format(diff|abs) }}</span>
+                        {% endif %}
+                    {% endif %}
+                </td>
                 <td>
                     {% if t.balance_status.value == "BALANCED" %}
                     <span class="badge badge-success">BALANCED</span>
@@ -80,7 +97,7 @@
                 <td><a href="/web/transactions/{{ t.transaction_id }}">View</a></td>
             </tr>
             {% else %}
-            <tr><td colspan="10" class="text-muted" style="text-align:center; padding:20px;">No transactions match the selected filters.</td></tr>
+            <tr><td colspan="12" class="text-muted" style="text-align:center; padding:20px;">No transactions match the selected filters.</td></tr>
             {% endfor %}
             </tbody>
         </table>

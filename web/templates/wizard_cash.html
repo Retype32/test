@@ -1,0 +1,157 @@
+{% extends "wizard_base.html" %}
+{% block title %}New Transaction — Count Cash{% endblock %}
+{% block card_class %}wide{% endblock %}
+{% block wizard_title %}Count Cash{% endblock %}
+{% block wizard_subtitle %}Enter counts manually or read them from the machine{% endblock %}
+{% block content %}
+
+<div class="wizard-summary">
+    <div class="row"><span class="k">CUSTOMER</span><span class="v">{{ draft.customer_name }} ({{ draft.customer_id }})</span></div>
+    <div class="row"><span class="k">LOCATION</span><span class="v">{{ draft.location_name }} ({{ draft.location_id }})</span></div>
+    <div class="row"><span class="k">BAG NUMBER</span><span class="v">{{ draft.bag_number }}</span></div>
+    <div class="row"><span class="k">WALLET ID</span><span class="v">{{ draft.wallet_id }}</span></div>
+    <div class="row"><span class="k">DECLARED AMOUNT</span><span class="v">&euro;{{ "%.2f"|format(draft.expected_total|float) }}</span></div>
+</div>
+
+<form method="post" action="/web/transactions/new/wizard/cash" id="cash-form">
+
+    <div class="machine-bar">
+        <button type="button" class="btn btn-sm btn-ghost" id="clear-counts-btn">Clear all</button>
+        <span id="machine-status" class="machine-status" role="status" aria-live="polite"></span>
+    </div>
+
+    <div class="denom-panel">
+        <div>
+            <div class="denom-list" role="group" aria-label="Denomination counts">
+                {% for field, label in denom_fields %}
+                <div class="denom-row" id="{{ field }}-row">
+                    <span class="denom-chip">{{ label }}{% if field == "count_coins" %} (bulk &euro;){% endif %}</span>
+                    <label class="visually-hidden" for="{{ field }}">{{ label }} count</label>
+                    <input type="number" min="0" step="1" name="{{ field }}" id="{{ field }}"
+                           value="{{ form_values.get(field, 0) }}" class="denom-input num"
+                           inputmode="numeric" autocomplete="off"
+                           {% if field == "count_coins" %}title="Total coin value, to the nearest euro (not a piece count)"{% endif %}>
+                    <span class="denom-value num" id="{{ field }}-value">&euro;0.00</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <aside class="total-panel" aria-live="polite">
+            <div class="total-head">Batch Total</div>
+            <div class="total-body">
+                <div class="total-value num" id="grand-total">&euro;0.00</div>
+                <div class="pieces"><span class="num" id="piece-count">0</span> notes &amp; coins</div>
+
+                <div class="diff-row show" id="diff-row">
+                    <div class="diff-label">Against declared amount</div>
+                    <div class="diff-value num" id="diff-value">&euro;0.00</div>
+                    <div class="text-faint" style="font-size:var(--t-xs); margin-top:2px;" id="diff-note"></div>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <div class="btn-group" style="margin-top:var(--s-5);">
+        <a href="/web/transactions/new/wizard/cancel" class="btn btn-ghost">Cancel</a>
+        <button type="submit" class="btn btn-primary btn-lg" style="flex:1;">
+            Review Transaction <span aria-hidden="true">&#9656;</span>
+        </button>
+    </div>
+</form>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const FIELD_VALUES = {"count_500": 500, "count_200": 200, "count_100": 100, "count_50": 50,
+                       "count_20": 20, "count_10": 10, "count_5": 5, "count_coins": 1};
+const DENOM_LABEL_TO_FIELD = {"€500": "count_500", "€200": "count_200", "€100": "count_100",
+                               "€50": "count_50", "€20": "count_20", "€10": "count_10",
+                               "€5": "count_5", "Coins": "count_coins"};
+const DECLARED_AMOUNT = {{ draft.expected_total|float }};
+
+const euro = n => "€" + n.toLocaleString("en-IE", {minimumFractionDigits: 2,
+                                                   maximumFractionDigits: 2});
+
+function updateTotals() {
+    let grandTotal = 0, pieces = 0;
+    Object.keys(FIELD_VALUES).forEach(field => {
+        const input = document.getElementById(field);
+        if (!input) return;
+        const count = Math.max(0, parseInt(input.value || "0", 10) || 0);
+        const value = count * FIELD_VALUES[field];
+        grandTotal += value;
+        pieces += count;
+        document.getElementById(field + "-value").textContent = euro(value);
+        document.getElementById(field + "-row").classList.toggle("filled", count > 0);
+    });
+
+    document.getElementById("grand-total").textContent = euro(grandTotal);
+    document.getElementById("piece-count").textContent = pieces.toLocaleString("en-IE");
+
+    const diffEl   = document.getElementById("diff-value");
+    const diffNote = document.getElementById("diff-note");
+    const diff = grandTotal - DECLARED_AMOUNT;
+    diffEl.textContent = (diff > 0 ? "+" : "") + euro(diff).replace("€-", "-€");
+    diffEl.className = "diff-value num " + (diff === 0 ? "ok" : (diff < 0 ? "bad" : "warn"));
+    diffNote.textContent = diff === 0 ? "Balanced"
+                         : (diff < 0 ? "Shortage against declared amount"
+                                     : "Overage against declared amount");
+}
+
+const denomInputs = Array.from(document.querySelectorAll(".denom-input"));
+denomInputs.forEach((el, index) => {
+    el.addEventListener("input", updateTotals);
+    el.addEventListener("focus", () => el.select());
+    el.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === "ArrowDown") {
+            event.preventDefault();
+            (denomInputs[index + 1] || denomInputs[0]).focus();
+        } else if (event.key === "ArrowUp") {
+            event.preventDefault();
+            (denomInputs[index - 1] || denomInputs[denomInputs.length - 1]).focus();
+        }
+    });
+});
+
+document.getElementById("clear-counts-btn").addEventListener("click", () => {
+    denomInputs.forEach(el => el.value = 0);
+    updateTotals();
+    denomInputs[0].focus();
+});
+
+async function readMachine() {
+    const status = document.getElementById("machine-status");
+    status.className = "machine-status";
+    status.innerHTML = '<span class="spinner"></span> Waiting for the machine…';
+    try {
+        const resp = await fetch("/web/transactions/new/count", {method: "POST"});
+        const data = await resp.json();
+        if (data.error) {
+            status.className = "machine-status bad";
+            status.textContent = "Machine unavailable — enter counts manually. " + data.error;
+            return;
+        }
+        let received = 0;
+        Object.entries(data.denominations).forEach(([label, count]) => {
+            const field = DENOM_LABEL_TO_FIELD[label];
+            if (field) {
+                const input = document.getElementById(field);
+                if (input) { input.value = count; received += count; }
+            }
+        });
+        updateTotals();
+        status.className = "machine-status ok";
+        status.textContent = "✓ Counted " + received + " pieces from the machine.";
+    } catch (e) {
+        status.className = "machine-status bad";
+        status.textContent = "Machine unavailable — enter counts manually.";
+    }
+}
+
+updateTotals();
+denomInputs[0].focus();
+readMachine();
+</script>
+{% endblock %}

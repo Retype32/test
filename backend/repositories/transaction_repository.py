@@ -24,6 +24,7 @@ class TransactionRepository:
         expected_total: Optional[Decimal],
         balance_status: BalanceStatus,
         denominations: list[dict],
+        wallet_id: Optional[str] = None,
     ) -> Transaction:
         txn = Transaction(
             user_id=user_id,
@@ -31,6 +32,7 @@ class TransactionRepository:
             customer_id=customer_id,
             location_id=location_id,
             bag_number=bag_number,
+            wallet_id=wallet_id,
             total_value=total_value,
             expected_total=expected_total,
             balance_status=balance_status,

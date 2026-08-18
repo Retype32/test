@@ -48,7 +48,8 @@
             {% endif %}
 
             <div class="section-label">Cashier</div>
-            <a class="nav-link {% if active_nav == 'new_transaction' %}active{% endif %}" href="/web/transactions/new">
+            <a class="nav-link {% if active_nav == 'new_transaction' %}active{% endif %}" href="/web/transactions/new"
+               id="new-transaction-link">
                 <span class="ico" aria-hidden="true">&#43;</span>New Transaction</a>
 
             {% if user.role.value in ("supervisor", "administrator") %}
@@ -119,6 +120,25 @@
         var next = current === "dark" ? "light" : "dark";
         root.setAttribute("data-theme", next);
         try { localStorage.setItem("nexus-theme", next); } catch (e) { /* ignore */ }
+    });
+})();
+
+(function () {
+    // "New Transaction" opens a dedicated popup window that walks through the
+    // wizard's four steps; the main window/tab stays where it was.
+    var link = document.getElementById("new-transaction-link");
+    if (!link) return;
+    link.addEventListener("click", function (event) {
+        event.preventDefault();
+        var w = 480, h = 720;
+        var left = Math.max(0, Math.round((screen.width - w) / 2));
+        var top = Math.max(0, Math.round((screen.height - h) / 2));
+        window.open(
+            "/web/transactions/new/wizard/customer",
+            "nexus_new_transaction",
+            "width=" + w + ",height=" + h + ",left=" + left + ",top=" + top +
+            ",menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes"
+        );
     });
 })();
 </script>

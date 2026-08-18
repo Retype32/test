@@ -1,0 +1,22 @@
+{% extends "wizard_base.html" %}
+{% block title %}Transaction Cancelled — Brink's Nexus{% endblock %}
+{% block wizard_title %}Transaction Cancelled{% endblock %}
+{% block wizard_subtitle %}Nothing was saved{% endblock %}
+{% block content %}
+
+<p class="text-muted">This transaction was cancelled. You can close this window or start a new one.</p>
+
+<div class="btn-group" style="margin-top:var(--s-5);">
+    <a href="/web/transactions/new/wizard/customer" class="btn" style="flex:1;">New Transaction</a>
+    <button type="button" class="btn btn-primary btn-lg" id="close-btn" style="flex:1;">Close Window</button>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById("close-btn").addEventListener("click", () => {
+    window.close();
+});
+</script>
+{% endblock %}

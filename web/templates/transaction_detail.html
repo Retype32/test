@@ -18,8 +18,27 @@
             <tr><td><strong>Processed By</strong></td><td>{{ txn.username }}</td></tr>
             <tr><td><strong>Customer / Location</strong></td><td>{{ txn.customer_id }} / {{ txn.location_id }}</td></tr>
             <tr><td><strong>Bag Number</strong></td><td>{{ txn.bag_number }}</td></tr>
+            <tr><td><strong>Wallet ID</strong></td><td>{{ txn.wallet_id or "—" }}</td></tr>
             <tr><td><strong>Status</strong></td><td>{{ txn.balance_status.value }}</td></tr>
-            <tr><td><strong>Total Value</strong></td><td>&euro;{{ "%.2f"|format(txn.total_value) }}</td></tr>
+            <tr><td><strong>Declared Amount</strong></td><td>{% if txn.expected_total is not none %}&euro;{{ "%.2f"|format(txn.expected_total) }}{% else %}&mdash;{% endif %}</td></tr>
+            <tr><td><strong>Total Counted</strong></td><td>&euro;{{ "%.2f"|format(txn.total_value) }}</td></tr>
+            <tr>
+                <td><strong>Discrepancy</strong></td>
+                <td>
+                    {% if txn.expected_total is none %}
+                    &mdash;
+                    {% else %}
+                        {% set diff = txn.total_value - txn.expected_total %}
+                        {% if diff == 0 %}
+                        <span style="color:var(--ok-fg);">&euro;0.00 &#10003; BALANCED</span>
+                        {% elif diff < 0 %}
+                        <span style="color:var(--bad-fg);">&minus;&euro;{{ "%.2f"|format(diff|abs) }} SHORTAGE</span>
+                        {% else %}
+                        <span style="color:var(--warn-fg);">+&euro;{{ "%.2f"|format(diff|abs) }} OVERAGE</span>
+                        {% endif %}
+                    {% endif %}
+                </td>
+            </tr>
             <tr><td><strong>Duplicate Flag</strong></td><td>{{ txn.duplicate_flag_status }}</td></tr>
         </table>
     </div>

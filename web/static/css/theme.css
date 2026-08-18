@@ -890,6 +890,73 @@ kbd {
     font-size: var(--t-xs); color: var(--fg-faint);
 }
 
+/* --------------------------------------------------------------------------
+   New Transaction wizard (popup window)
+   -------------------------------------------------------------------------- */
+
+.wizard-card {
+    width: 100%; max-width: 460px;
+    background: var(--bg-raised);
+    border-radius: var(--r-xl);
+    overflow: hidden;
+    box-shadow: var(--shadow-lg);
+    border: 1px solid var(--line);
+    transition: max-width var(--med) var(--ease);
+}
+.wizard-card.wide { max-width: 760px; }
+.wizard-card .wizard-header {
+    background: linear-gradient(150deg, var(--navy-800), var(--navy-600));
+    padding: var(--s-5) var(--s-6) var(--s-5);
+    border-bottom: 2px solid var(--gold-500);
+}
+.wizard-card .wizard-header .brand-lockup {
+    max-width: 170px; color: #fff;
+    --logo-blue: #fff; --logo-gold: var(--gold-400);
+}
+.wizard-steps { display: flex; gap: 5px; margin-top: var(--s-5); }
+.wizard-steps .step { flex: 1; height: 4px; border-radius: var(--r-full); background: rgba(255,255,255,.18); }
+.wizard-steps .step.done { background: var(--gold-400); }
+.wizard-steps .step.active { background: #fff; }
+.wizard-card .wizard-title {
+    color: #fff; font-size: var(--t-xl); font-weight: 700; margin-top: var(--s-4);
+    letter-spacing: -.01em;
+}
+.wizard-card .wizard-subtitle { color: rgba(255,255,255,.62); font-size: var(--t-sm); margin-top: 3px; }
+.wizard-card .wizard-body { padding: var(--s-6); }
+
+.wizard-summary {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: var(--s-3) var(--s-4);
+    margin-bottom: var(--s-5);
+    background: var(--bg-inset); border: 1px solid var(--line); border-radius: var(--r-md);
+    font-size: var(--t-sm);
+}
+.wizard-summary .row { display: flex; justify-content: space-between; gap: var(--s-3); }
+.wizard-summary .row .k { color: var(--fg-muted); }
+.wizard-summary .row .v { font-weight: 650; text-align: right; }
+
+.wizard-readout {
+    display: flex; align-items: center; min-height: 40px;
+    padding: 0 var(--s-3);
+    background: var(--bg-inset); border: 1px solid var(--line); border-radius: var(--r-md);
+    font-weight: 650; color: var(--fg);
+}
+
+.scan-input {
+    width: 100%; height: 58px;
+    font-size: 24px; text-align: center; letter-spacing: 2px;
+    font-family: var(--font-num);
+}
+
+.wizard-status { font-size: var(--t-sm); min-height: 18px; }
+.wizard-status.bad { color: var(--bad-fg); }
+.wizard-status.ok { color: var(--ok-fg); }
+
+.wizard-foot {
+    text-align: center; padding: var(--s-3) var(--s-6) var(--s-5);
+    font-size: var(--t-xs); color: var(--fg-faint);
+}
+
 .catalog-option {
     display: flex; align-items: center; gap: var(--s-3);
     width: 100%; text-align: left;

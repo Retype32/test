@@ -27,6 +27,9 @@ class Transaction(CatalogBase):
     customer_id: Mapped[str] = mapped_column(ForeignKey("customers.customer_id"), nullable=False, index=True)
     location_id: Mapped[str] = mapped_column(ForeignKey("locations.location_id"), nullable=False, index=True)
     bag_number: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Scanned in the wizard's third step. Nullable because transactions created
+    # before that step existed have none — not a data-quality gap to backfill.
+    wallet_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     total_value: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     balance_status: Mapped[BalanceStatus] = mapped_column(
         SAEnum(BalanceStatus), nullable=False, default=BalanceStatus.pending

@@ -53,6 +53,7 @@ async def _fetch_enriched_transactions(
             "customer_name": customer_names.get(t.customer_id, t.customer_id),
             "location_name": location_names.get(t.location_id, t.location_id),
             "bag_number": t.bag_number,
+            "wallet_id": t.wallet_id,
             "username": t.username,
             "expected_total": t.expected_total,
             "total_value": t.total_value,

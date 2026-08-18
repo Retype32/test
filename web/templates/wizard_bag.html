@@ -1,0 +1,42 @@
+{% extends "wizard_base.html" %}
+{% block title %}New Transaction — Bag Details{% endblock %}
+{% block wizard_title %}Bag Details{% endblock %}
+{% block wizard_subtitle %}Scan the bag and enter the amount{% endblock %}
+{% block content %}
+
+<div class="wizard-summary">
+    <div class="row"><span class="k">CUSTOMER</span><span class="v">{{ draft.customer_name }} ({{ draft.customer_id }})</span></div>
+    <div class="row"><span class="k">LOCATION</span><span class="v">{{ draft.location_name }} ({{ draft.location_id }})</span></div>
+</div>
+
+<form method="post" action="/web/transactions/new/wizard/bag" id="bag-form">
+    <div class="form-group">
+        <label for="bag_number">Bag Number</label>
+        <input type="text" id="bag_number" name="bag_number" class="scan-input num"
+               maxlength="20" inputmode="numeric" autocomplete="off" placeholder="310XXXXXXXXX"
+               value="{{ form_values.get('bag_number', '') }}" autofocus required>
+        <span class="hint">12&ndash;16 digits &middot; usually starts with 310</span>
+    </div>
+
+    <div class="form-group">
+        <label for="amount">Amount (&euro;)</label>
+        <input type="text" id="amount" name="amount" class="num" inputmode="decimal"
+               placeholder="0.00" value="{{ form_values.get('amount', '') }}" required>
+        <span class="hint">Enter 0 if the bag is empty</span>
+    </div>
+
+    <div class="btn-group" style="margin-top:var(--s-5);">
+        <a href="/web/transactions/new/wizard/cancel" class="btn btn-ghost">Cancel</a>
+        <button type="submit" class="btn btn-primary btn-lg" style="flex:1;">
+            Continue <span aria-hidden="true">&#9656;</span>
+        </button>
+    </div>
+</form>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById("bag_number").focus();
+</script>
+{% endblock %}

@@ -18,23 +18,29 @@ def _bag(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
 
 
-def _payload(bag_number: str, customer_id="C001", location_id="L001", total="180.00"):
+def _payload(bag_number: str, customer_id="C001", location_id="L001", total="180.00", expected_total=None):
     denominations = [
         {"denomination": "€100", "count": 1, "value": "100.00"},
         {"denomination": "€50", "count": 1, "value": "50.00"},
         {"denomination": "€20", "count": 1, "value": "20.00"},
     ]
-    return {
+    payload = {
         "customer_id": customer_id,
         "location_id": location_id,
         "bag_number": bag_number,
         "total_value": total,
         "denominations": denominations,
     }
+    if expected_total is not None:
+        payload["expected_total"] = expected_total
+    return payload
 
 
 async def test_create_balanced_transaction(api_client, tokens):
-    payload = _payload(_bag("BAL"), total="170.00")
+    # balance_status reflects whether the counted total (total_value) matches
+    # what was expected for the bag (expected_total), not whether total_value
+    # merely agrees with its own denomination breakdown.
+    payload = _payload(_bag("BAL"), total="170.00", expected_total="170.00")
     r = await api_client.post("/api/v1/transactions/", json=payload, headers=_headers(tokens["cashier1"]))
     assert r.status_code == 201
     body = r.json()
@@ -44,11 +50,18 @@ async def test_create_balanced_transaction(api_client, tokens):
     assert len(body["denominations"]) == 3
 
 
-async def test_create_transaction_declared_total_mismatch_is_not_balanced(api_client, tokens):
-    payload = _payload(_bag("UNBAL"), total="999.00")
+async def test_create_transaction_actual_total_mismatch_is_not_balanced(api_client, tokens):
+    payload = _payload(_bag("UNBAL"), total="170.00", expected_total="999.00")
     r = await api_client.post("/api/v1/transactions/", json=payload, headers=_headers(tokens["cashier1"]))
     assert r.status_code == 201
     assert r.json()["balance_status"] == "NOT BALANCED"
+
+
+async def test_create_transaction_without_expected_total_is_pending(api_client, tokens):
+    payload = _payload(_bag("NOEXP"), total="170.00")
+    r = await api_client.post("/api/v1/transactions/", json=payload, headers=_headers(tokens["cashier1"]))
+    assert r.status_code == 201
+    assert r.json()["balance_status"] == "PENDING"
 
 
 async def test_create_transaction_unknown_customer_rejected(api_client, tokens):

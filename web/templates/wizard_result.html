@@ -1,0 +1,41 @@
+{% extends "wizard_base.html" %}
+{% block title %}Transaction Saved — Brink's Nexus{% endblock %}
+{% block wizard_title %}Transaction Saved{% endblock %}
+{% block wizard_subtitle %}Complete{% endblock %}
+{% block content %}
+
+{% if diff_status == "BALANCED" %}
+<div class="alert alert-success" style="font-size:16px; font-weight:700;">&#10003; BALANCED</div>
+{% elif diff_status == "SHORTAGE" %}
+<div class="alert alert-warning" style="font-size:16px; font-weight:700;">&#9660; SHORTAGE &euro;{{ "%.2f"|format(diff|abs) }}</div>
+{% else %}
+<div class="alert" style="font-size:16px; font-weight:700; background:var(--info-bg); color:var(--info-fg); border:1px solid var(--info-line);">&#9650; OVERAGE &euro;{{ "%.2f"|format(diff|abs) }}</div>
+{% endif %}
+
+<div class="wizard-summary" style="margin-top:var(--s-4);">
+    <div class="row"><span class="k">TRANSACTION ID</span><span class="v">{{ txn.transaction_id }}</span></div>
+    <div class="row"><span class="k">BAG NUMBER</span><span class="v">{{ txn.bag_number }}</span></div>
+    <div class="row"><span class="k">WALLET ID</span><span class="v">{{ txn.wallet_id }}</span></div>
+    <div class="row"><span class="k">TOTAL PROCESSED</span><span class="v">&euro;{{ "%.2f"|format(txn.total_value) }}</span></div>
+    <div class="row"><span class="k">DECLARED AMOUNT</span><span class="v">&euro;{{ "%.2f"|format(expected_total) }}</span></div>
+</div>
+
+<div class="btn-group" style="margin-top:var(--s-6); flex-direction:column;">
+    <a href="/web/transactions/new/wizard/wallet/next" class="btn btn-primary btn-lg" style="width:100%;">
+        Complete Transaction &mdash; Next Wallet <span aria-hidden="true">&#9656;</span>
+    </a>
+    <div class="btn-group" style="width:100%;">
+        <a href="/web/transactions/new/wizard/customer" class="btn" style="flex:1;">New Bag</a>
+        <button type="button" class="btn btn-ghost" id="close-btn" style="flex:1;">End Deposit</button>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById("close-btn").addEventListener("click", () => {
+    window.close();
+});
+</script>
+{% endblock %}

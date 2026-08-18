@@ -4,238 +4,37 @@
 {% block page_subtitle %}Cashier <span class="crumb">&#9656;</span> New Transaction{% endblock %}
 {% block content %}
 
-<form method="post" action="/web/transactions/new/confirm" id="txn-form"
-      data-selected-customer="{{ form_values.get('customer_id', '') }}"
-      data-selected-location="{{ form_values.get('location_id', '') }}">
-
-<div class="card">
-    <div class="card-header">Customer &amp; Location</div>
+<div class="card" style="max-width:560px;">
+    <div class="card-header">Start a Transaction</div>
     <div class="card-body">
-        <div class="form-row">
-            <div class="form-group" style="flex:1 1 280px;">
-                <label for="customer-select">Customer</label>
-                <select name="customer_id" id="customer-select" required>
-                    <option value="">&mdash; Select customer &mdash;</option>
-                    {% for c in customers %}
-                    <option value="{{ c.customer_id }}">{{ c.customer_id }} &mdash; {{ c.customer_name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="form-group" style="flex:1 1 280px;">
-                <label for="location-select">Location</label>
-                <select name="location_id" id="location-select" required disabled>
-                    <option value="">&mdash; Select location &mdash;</option>
-                </select>
-            </div>
-        </div>
-        <div class="form-row">
-            <div class="form-group" style="flex:1 1 220px;">
-                <label for="bag_number">Bag Number</label>
-                <input type="text" id="bag_number" name="bag_number" placeholder="e.g. BAG-2026-001"
-                       value="{{ form_values.get('bag_number', '') }}" required spellcheck="false">
-            </div>
-            <div class="form-group" style="flex:1 1 220px;">
-                <label for="expected_total">Expected Total (&euro;)</label>
-                <input type="text" id="expected_total" name="expected_total" class="num"
-                       placeholder="e.g. 1500.00" value="{{ form_values.get('expected_total', '') }}"
-                       inputmode="decimal">
-                <span class="hint">Optional &mdash; enables the difference check</span>
-            </div>
-        </div>
+        <p class="text-muted" style="margin-top:0;">
+            Transactions are processed in a separate window, one step at a time:
+        </p>
+        <ol style="margin:0 0 var(--s-5); padding-left:20px; color:var(--fg-secondary); line-height:1.9;">
+            <li>Customer ID and Location</li>
+            <li>Bag number and declared amount</li>
+            <li>Wallet ID</li>
+            <li>Cash count and confirmation</li>
+        </ol>
+        <button type="button" class="btn btn-primary btn-lg" id="start-txn-btn">
+            Start Transaction <span aria-hidden="true">&#9656;</span>
+        </button>
     </div>
 </div>
 
-<div class="card">
-    <div class="card-header">
-        <span>Denomination Entry</span>
-        <span class="text-faint" style="text-transform:none; letter-spacing:0; font-weight:500;">
-            <kbd>&uarr;</kbd> <kbd>&darr;</kbd> to move &middot; <kbd>Enter</kbd> next field
-        </span>
-    </div>
-    <div class="card-body">
-
-        <div class="machine-bar">
-            <button type="button" class="btn btn-gold btn-sm" id="read-machine-btn">
-                <span aria-hidden="true">&#9660;</span> Read Machine
-            </button>
-            <button type="button" class="btn btn-sm btn-ghost" id="clear-counts-btn">Clear all</button>
-            <span id="machine-status" class="machine-status" role="status" aria-live="polite"></span>
-        </div>
-
-        <div class="denom-panel">
-            <div>
-                <div class="denom-list" role="group" aria-label="Denomination counts">
-                    {% for field, label in denom_fields %}
-                    <div class="denom-row" id="{{ field }}-row">
-                        <span class="denom-chip">{{ label }}</span>
-                        <label class="visually-hidden" for="{{ field }}">{{ label }} count</label>
-                        <input type="number" min="0" step="1" name="{{ field }}" id="{{ field }}"
-                               value="{{ form_values.get(field, 0) }}" class="denom-input num"
-                               inputmode="numeric" autocomplete="off">
-                        <span class="denom-value num" id="{{ field }}-value">&euro;0.00</span>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-
-            <aside class="total-panel" aria-live="polite">
-                <div class="total-head">Batch Total</div>
-                <div class="total-body">
-                    <div class="total-value num" id="grand-total">&euro;0.00</div>
-                    <div class="pieces"><span class="num" id="piece-count">0</span> notes &amp; coins</div>
-
-                    <div class="diff-row" id="diff-row">
-                        <div class="diff-label">Against expected</div>
-                        <div class="diff-value num" id="diff-value">&euro;0.00</div>
-                        <div class="text-faint" style="font-size:var(--t-xs); margin-top:2px;"
-                             id="diff-note"></div>
-                    </div>
-                </div>
-            </aside>
-        </div>
-    </div>
-</div>
-
-<div class="btn-group">
-    <button type="submit" class="btn btn-primary btn-lg">
-        Proceed to Confirm <span aria-hidden="true">&#9656;</span>
-    </button>
-</div>
-
-</form>
 {% endblock %}
 
 {% block scripts %}
 <script>
-const FIELD_VALUES = {"count_500": 500, "count_200": 200, "count_100": 100, "count_50": 50,
-                       "count_20": 20, "count_10": 10, "count_5": 5, "count_coins": 1};
-const DENOM_LABEL_TO_FIELD = {"€500": "count_500", "€200": "count_200", "€100": "count_100",
-                               "€50": "count_50", "€20": "count_20", "€10": "count_10",
-                               "€5": "count_5", "Coins": "count_coins"};
-
-const CUSTOMERS = {{ customers_json | safe }};
-const customerMap = {};
-CUSTOMERS.forEach(c => customerMap[c.customer_id] = c);
-
-const customerSelect = document.getElementById("customer-select");
-const locationSelect = document.getElementById("location-select");
-const expectedInput  = document.getElementById("expected_total");
-
-const euro = n => "€" + n.toLocaleString("en-IE", {minimumFractionDigits: 2,
-                                                   maximumFractionDigits: 2});
-
-function populateLocations(customerId, preselectLocation) {
-    locationSelect.innerHTML = '<option value="">— Select location —</option>';
-    const customer = customerMap[customerId];
-    if (!customer) { locationSelect.disabled = true; return; }
-    customer.locations.forEach(loc => {
-        const opt = document.createElement("option");
-        opt.value = loc.location_id;
-        opt.textContent = loc.location_id + " — " + loc.location_name;
-        if (preselectLocation && loc.location_id === preselectLocation) opt.selected = true;
-        locationSelect.appendChild(opt);
-    });
-    locationSelect.disabled = false;
-}
-customerSelect.addEventListener("change", () => populateLocations(customerSelect.value, null));
-
-function updateTotals() {
-    let grandTotal = 0, pieces = 0;
-    Object.keys(FIELD_VALUES).forEach(field => {
-        const input = document.getElementById(field);
-        if (!input) return;
-        const count = Math.max(0, parseInt(input.value || "0", 10) || 0);
-        const value = count * FIELD_VALUES[field];
-        grandTotal += value;
-        pieces += count;
-        document.getElementById(field + "-value").textContent = euro(value);
-        document.getElementById(field + "-row").classList.toggle("filled", count > 0);
-    });
-
-    document.getElementById("grand-total").textContent = euro(grandTotal);
-    document.getElementById("piece-count").textContent = pieces.toLocaleString("en-IE");
-
-    // Difference against the expected total, when one was given.
-    const diffRow  = document.getElementById("diff-row");
-    const diffEl   = document.getElementById("diff-value");
-    const diffNote = document.getElementById("diff-note");
-    const expected = parseFloat((expectedInput.value || "").replace(/[^0-9.\-]/g, ""));
-
-    if (!isNaN(expected) && expected > 0) {
-        const diff = grandTotal - expected;
-        diffRow.classList.add("show");
-        diffEl.textContent = (diff > 0 ? "+" : "") + euro(diff).replace("€-", "-€");
-        diffEl.className = "diff-value num " + (diff === 0 ? "ok" : (diff < 0 ? "bad" : "warn"));
-        diffNote.textContent = diff === 0 ? "Balanced"
-                             : (diff < 0 ? "Shortage against expected"
-                                         : "Overage against expected");
-    } else {
-        diffRow.classList.remove("show");
-    }
-}
-
-const denomInputs = Array.from(document.querySelectorAll(".denom-input"));
-denomInputs.forEach((el, index) => {
-    el.addEventListener("input", updateTotals);
-    el.addEventListener("focus", () => el.select());
-    // Keyboard-first entry: cashiers run this all shift without a mouse.
-    el.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === "ArrowDown") {
-            event.preventDefault();
-            (denomInputs[index + 1] || denomInputs[0]).focus();
-        } else if (event.key === "ArrowUp") {
-            event.preventDefault();
-            (denomInputs[index - 1] || denomInputs[denomInputs.length - 1]).focus();
-        }
-    });
+document.getElementById("start-txn-btn").addEventListener("click", () => {
+    const w = 480, h = 720;
+    const left = Math.max(0, Math.round((screen.width - w) / 2));
+    const top = Math.max(0, Math.round((screen.height - h) / 2));
+    window.open(
+        "/web/transactions/new/wizard/customer",
+        "nexus_new_transaction",
+        `width=${w},height=${h},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes`
+    );
 });
-expectedInput.addEventListener("input", updateTotals);
-
-document.getElementById("clear-counts-btn").addEventListener("click", () => {
-    denomInputs.forEach(el => el.value = 0);
-    updateTotals();
-    denomInputs[0].focus();
-});
-
-document.getElementById("read-machine-btn").addEventListener("click", async (event) => {
-    const button = event.currentTarget;
-    const status = document.getElementById("machine-status");
-    button.disabled = true;
-    status.className = "machine-status";
-    status.innerHTML = '<span class="spinner"></span> Waiting for the machine…';
-    try {
-        const resp = await fetch("/web/transactions/new/count", {method: "POST"});
-        const data = await resp.json();
-        if (data.error) {
-            status.className = "machine-status bad";
-            status.textContent = "Machine unavailable — enter counts manually. " + data.error;
-            return;
-        }
-        let received = 0;
-        Object.entries(data.denominations).forEach(([label, count]) => {
-            const field = DENOM_LABEL_TO_FIELD[label];
-            if (field) {
-                const input = document.getElementById(field);
-                if (input) { input.value = count; received += count; }
-            }
-        });
-        updateTotals();
-        status.className = "machine-status ok";
-        status.textContent = "✓ Counted " + received + " pieces from the machine.";
-    } catch (e) {
-        status.className = "machine-status bad";
-        status.textContent = "Machine unavailable — enter counts manually.";
-    } finally {
-        button.disabled = false;
-    }
-});
-
-// Restore selections after a validation re-render, then compute initial totals.
-const form = document.getElementById("txn-form");
-if (form.dataset.selectedCustomer) {
-    customerSelect.value = form.dataset.selectedCustomer;
-    populateLocations(form.dataset.selectedCustomer, form.dataset.selectedLocation);
-}
-updateTotals();
 </script>
 {% endblock %}

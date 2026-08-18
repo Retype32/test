@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>{% block title %}New Transaction — Brink's Nexus{% endblock %}</title>
+    <link rel="stylesheet" href="/web/static/css/theme.css">
+    <link rel="icon" type="image/svg+xml" href="/web/static/img/nexus-mark.svg">
+    <script>
+        (function () {
+            try {
+                var saved = localStorage.getItem("nexus-theme");
+                if (saved === "dark" || saved === "light") {
+                    document.documentElement.setAttribute("data-theme", saved);
+                }
+            } catch (e) { /* private mode — fall back to the OS preference */ }
+        })();
+    </script>
+</head>
+<body>
+<div class="centered-page">
+    <div class="wizard-card {% block card_class %}{% endblock %}">
+        <div class="wizard-header">
+            {% include "partials/_brand_lockup.html" %}
+            <div class="wizard-steps" aria-hidden="true">
+                {% for s in range(1, 5) %}
+                <div class="step {% if s < step %}done{% elif s == step %}active{% endif %}"></div>
+                {% endfor %}
+            </div>
+            <div class="wizard-title">{% block wizard_title %}{% endblock %}</div>
+            <div class="wizard-subtitle">Step {{ step }} of 4 &middot; {% block wizard_subtitle %}{% endblock %}</div>
+        </div>
+        <div class="wizard-body">
+            {% if error_message %}<div class="alert alert-error" role="alert">{{ error_message }}</div>{% endif %}
+            {% block content %}{% endblock %}
+        </div>
+    </div>
+</div>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -35,12 +35,16 @@ class TransactionService:
         self.notification_service = NotificationService(db)
         self.duplicate_service = DuplicateDetectionService(db)
 
-    def calculate_balance_status(self, denominations: list[dict], declared_total: Decimal) -> BalanceStatus:
-        computed = sum(
-            Decimal(str(d["count"])) * DENOMINATION_VALUES.get(d["denomination"], Decimal("0"))
-            for d in denominations
-        )
-        return BalanceStatus.balanced if computed == declared_total else BalanceStatus.not_balanced
+    def calculate_balance_status(
+        self, total_value: Decimal, expected_total: Optional[Decimal]
+    ) -> BalanceStatus:
+        # "Balanced" means the cash actually counted matches what was expected
+        # for this bag. With nothing declared to check against, there's no
+        # discrepancy to report either way, so the status stays PENDING
+        # rather than defaulting to a (misleading) BALANCED.
+        if expected_total is None:
+            return BalanceStatus.pending
+        return BalanceStatus.balanced if total_value == expected_total else BalanceStatus.not_balanced
 
     async def create_transaction(self, user_id: uuid.UUID, username: str, data: TransactionCreate) -> Transaction:
         today = datetime.now().date()
@@ -61,7 +65,7 @@ class TransactionService:
             {"denomination": d.denomination, "count": d.count, "value": d.value}
             for d in data.denominations
         ]
-        balance_status = self.calculate_balance_status(denom_list, data.total_value)
+        balance_status = self.calculate_balance_status(data.total_value, data.expected_total)
 
         txn = await self.repo.create(
             user_id=user_id,
@@ -69,6 +73,7 @@ class TransactionService:
             customer_id=data.customer_id,
             location_id=data.location_id,
             bag_number=data.bag_number,
+            wallet_id=data.wallet_id,
             total_value=data.total_value,
             expected_total=data.expected_total,
             balance_status=balance_status,

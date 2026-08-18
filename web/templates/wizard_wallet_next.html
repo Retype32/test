@@ -1,0 +1,42 @@
+{% extends "wizard_base.html" %}
+{% block title %}Next Wallet — Brink's Nexus{% endblock %}
+{% block wizard_title %}Next Wallet{% endblock %}
+{% block wizard_subtitle %}Same bag &middot; new wallet{% endblock %}
+{% block content %}
+
+<div class="wizard-summary">
+    <div class="row"><span class="k">CUSTOMER</span><span class="v">{{ draft.customer_name }} ({{ draft.customer_id }})</span></div>
+    <div class="row"><span class="k">LOCATION</span><span class="v">{{ draft.location_name }} ({{ draft.location_id }})</span></div>
+    <div class="row"><span class="k">BAG NUMBER</span><span class="v">{{ draft.bag_number }}</span></div>
+</div>
+
+<form method="post" action="/web/transactions/new/wizard/wallet/next" id="next-wallet-form">
+    <div class="form-group">
+        <label for="wallet_id">Wallet ID</label>
+        <input type="text" id="wallet_id" name="wallet_id" class="scan-input"
+               autocomplete="off" placeholder="Scan wallet barcode"
+               value="{{ form_values.get('wallet_id', '') }}" autofocus required>
+    </div>
+
+    <div class="form-group">
+        <label for="amount">Amount (&euro;)</label>
+        <input type="text" id="amount" name="amount" class="num" inputmode="decimal"
+               placeholder="0.00" value="{{ form_values.get('amount', '') }}" required>
+        <span class="hint">Declared amount for this wallet</span>
+    </div>
+
+    <div class="btn-group" style="margin-top:var(--s-5);">
+        <a href="/web/transactions/new/wizard/cancel" class="btn btn-ghost">Cancel</a>
+        <button type="submit" class="btn btn-primary btn-lg" style="flex:1;">
+            Continue <span aria-hidden="true">&#9656;</span>
+        </button>
+    </div>
+</form>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById("wallet_id").focus();
+</script>
+{% endblock %}
