@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title=settings.app_name,
+    title=settings.display_name,
     version=settings.app_version,
     lifespan=lifespan,
 )
@@ -107,4 +107,4 @@ async def web_aware_http_exception_handler(request: Request, exc: StarletteHTTPE
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "app": settings.app_name}
+    return {"status": "ok", "app": settings.display_name}

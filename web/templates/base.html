@@ -4,9 +4,11 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>{% block title %}Brink's Nexus{% endblock %}</title>
+    <title>{% block title %}{{ settings.display_name }}{% endblock %}</title>
     <link rel="stylesheet" href="/web/static/css/theme.css">
+    {% if settings.branding_enabled %}
     <link rel="icon" type="image/svg+xml" href="/web/static/img/nexus-mark.svg">
+    {% endif %}
     <script>
         // Applied before first paint so a dark-mode user never sees a white flash.
         (function () {
@@ -24,7 +26,7 @@
 <div class="app-shell">
     <aside class="sidebar">
         <div class="brand">
-            {% include "partials/_brand_rail.html" %}
+            {% if settings.branding_enabled %}{% include "partials/_brand_rail.html" %}{% endif %}
             <div class="tagline">Cash Processing Platform</div>
         </div>
 

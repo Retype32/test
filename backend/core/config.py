@@ -5,6 +5,11 @@ class Settings(BaseSettings):
     app_name: str = "Brink's Nexus"
     app_version: str = "1.0.0"
 
+    # Toggle the product's real name and logo throughout the UI. Off = a
+    # generic, unbranded interface; the name and the logo templates stay in
+    # place, just unused, for whenever this is switched back on.
+    branding_enabled: bool = False
+
     database_url_core: str = "sqlite+aiosqlite:///./core.db"
     database_url_vms: str = "sqlite+aiosqlite:///./catalog_vms.db"
     database_url_dayshift: str = "sqlite+aiosqlite:///./catalog_dayshift.db"
@@ -21,6 +26,12 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         extra = "ignore"
+
+    @property
+    def display_name(self) -> str:
+        """The name actually shown in the UI -- the real app_name, unless
+        branding is deactivated, in which case a generic placeholder."""
+        return self.app_name if self.branding_enabled else "Cash Processing"
 
 
 settings = Settings()

@@ -16,6 +16,20 @@ CATALOG_DISPLAY_NAMES: dict[CatalogCode, str] = {
     CatalogCode.esnf: "ESNF",
 }
 
+# Shown instead of CATALOG_DISPLAY_NAMES while settings.branding_enabled is
+# off, so a catalog name never leaks the product's real name either.
+_ANONYMOUS_CATALOG_DISPLAY_NAMES: dict[CatalogCode, str] = {
+    CatalogCode.vms: "VMS",
+    CatalogCode.dayshift: "Dayshift",
+    CatalogCode.complete: "Complete",
+    CatalogCode.esnf: "ESNF",
+}
+
+
+def catalog_display_name(code: CatalogCode) -> str:
+    names = CATALOG_DISPLAY_NAMES if settings.branding_enabled else _ANONYMOUS_CATALOG_DISPLAY_NAMES
+    return names[code]
+
 _CATALOG_URLS: dict[CatalogCode, str] = {
     CatalogCode.vms: settings.database_url_vms,
     CatalogCode.dayshift: settings.database_url_dayshift,

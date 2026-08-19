@@ -4,9 +4,11 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>Not Found — Brink's Nexus</title>
+    <title>Not Found — {{ settings.display_name }}</title>
     <link rel="stylesheet" href="/web/static/css/theme.css">
+    {% if settings.branding_enabled %}
     <link rel="icon" type="image/svg+xml" href="/web/static/img/nexus-mark.svg">
+    {% endif %}
     <script>
         (function () {
             try {
@@ -22,7 +24,7 @@
 <div class="centered-page">
     <div class="auth-card">
         <div class="auth-header">
-            {% include "partials/_brand_lockup.html" %}
+            {% if settings.branding_enabled %}{% include "partials/_brand_lockup.html" %}{% endif %}
             <div class="err-code" aria-hidden="true">404</div>
             <div class="name">NOT FOUND</div>
             <div class="tagline">That page doesn't exist</div>

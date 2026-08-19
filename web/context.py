@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from backend.core.catalogs import CatalogCode, CATALOG_DISPLAY_NAMES
+from backend.core.catalogs import CatalogCode, catalog_display_name
 from backend.services.notification_service import NotificationService
 from backend.models.user import User
 
@@ -14,6 +14,6 @@ async def build_nav_context(current_user: User, catalog_code: CatalogCode, catal
     return {
         "user": current_user,
         "catalog_code": catalog_code.value,
-        "catalog_name": CATALOG_DISPLAY_NAMES[catalog_code],
+        "catalog_name": catalog_display_name(catalog_code),
         "notification_count": count,
     }
