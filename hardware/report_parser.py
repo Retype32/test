@@ -26,6 +26,10 @@ _CONTROL = {"\x00", "\x0c", "\x1b", "\x07", "\x0e", "\x0f"}
 _C1CHECK_ROW_RE = re.compile(
     r"(?<!\d)(5|10|20|50|100|200|500)(?:[.,]00)?\s*[Xx]\s*(\d+)\s*=\s*([0-9]+(?:[.,][0-9]{1,2})?)"
 )
+_C1CHECK_SUBTOTAL_RE = re.compile(r"(?i)\bSubTotal\s+([0-9]+(?:[.,][0-9]{1,2})?)")
+_C1CHECK_COIN_RE = re.compile(r"(?i)\bCoin\s+([0-9]+(?:[.,][0-9]{1,2})?)")
+_C1CHECK_TOTAL_RE = re.compile(r"(?i)\bTotal\s+(\d+)\s*=\s*([0-9]+(?:[.,][0-9]{1,2})?)")
+_C1CHECK_REJECT_RE = re.compile(r"(?i)\bReject Qty\s+(\d+)")
 
 
 @dataclass
@@ -226,59 +230,62 @@ def _parse_denomination(line, denom, remainder, profile: DeviceProfile, report: 
             f"{denom.device}: printed amount {printed_value} does not match "
             f"{quantity} x {denom.value} = {expected}."
         )
-    report.values[denom.nexus] = printed_value if printed_value is not None else expected
+    value = printed_value if printed_value is not None else expected
+    report.values[denom.nexus] = report.values.get(denom.nexus, Decimal("0")) + value
 
 
 def _parse_compact_x_rows(lines: list[str], profile: DeviceProfile, report: ParsedReport) -> None:
     """Fallback for compact rows like '50X3=150' from the proven C1 collector."""
     by_value = {d.value: d for d in profile.denoms}
-    matched_any = False
+    unmatched_seen: set[str] = set()
 
     for line in lines:
-        for match in _C1CHECK_ROW_RE.finditer(line):
-            matched_any = True
-            face = Decimal(match.group(1).replace(",", "."))
-            quantity = int(match.group(2))
-            printed_value = _to_decimal(match.group(3), profile.decimal_separator)
-            denom = by_value.get(face)
-            if denom is None:
-                report.unmatched_lines.append(line)
-                continue
-
-            expected = denom.value * quantity
-            if denom.nexus in report.denominations:
-                report.denominations[denom.nexus] += quantity
-            else:
-                report.denominations[denom.nexus] = quantity
-            report.values[denom.nexus] = printed_value
-
-            if printed_value != expected:
-                report.warnings.append(
-                    f"{denom.device}: printed amount {printed_value} does not match "
-                    f"{quantity} x {denom.value} = {expected}."
-                )
-
-    if matched_any:
-        cleaned = "\n".join(lines)
         if report.subtotal_value is None:
-            m = re.search(r"(?i)\bSubTotal\s+([0-9]+(?:[.,][0-9]{1,2})?)", cleaned)
+            m = _C1CHECK_SUBTOTAL_RE.search(line)
             if m:
                 report.subtotal_value = _to_decimal(m.group(1), profile.decimal_separator)
         if report.coin_amount == Decimal("0"):
-            m = re.search(r"(?i)\bCoin\s+([0-9]+(?:[.,][0-9]{1,2})?)", cleaned)
+            m = _C1CHECK_COIN_RE.search(line)
             if m:
                 report.coin_amount = _to_decimal(m.group(1), profile.decimal_separator)
         if report.total_quantity is None or report.total_value is None:
-            m = re.search(r"(?i)\bTotal\s+(\d+)\s*=\s*([0-9]+(?:[.,][0-9]{1,2})?)", cleaned)
+            m = _C1CHECK_TOTAL_RE.search(line)
             if m:
                 if report.total_quantity is None:
                     report.total_quantity = int(m.group(1))
                 if report.total_value is None:
                     report.total_value = _to_decimal(m.group(2), profile.decimal_separator)
         if report.reject_quantity == 0:
-            m = re.search(r"(?i)\bReject Qty\s+(\d+)", cleaned)
+            m = _C1CHECK_REJECT_RE.search(line)
             if m:
                 report.reject_quantity = int(m.group(1))
+
+        for match in _C1CHECK_ROW_RE.finditer(line):
+            face = Decimal(match.group(1))
+            quantity = int(match.group(2))
+            printed_value = _to_decimal(match.group(3), profile.decimal_separator)
+            denom = by_value.get(face)
+            if denom is None:
+                if line not in unmatched_seen:
+                    report.unmatched_lines.append(line)
+                    unmatched_seen.add(line)
+                continue
+
+            expected = denom.value * quantity
+            if denom.nexus in report.denominations:
+                report.warnings.append(
+                    f"Denomination {denom.device} appeared more than once; summing."
+                )
+                report.denominations[denom.nexus] += quantity
+            else:
+                report.denominations[denom.nexus] = quantity
+            report.values[denom.nexus] = report.values.get(denom.nexus, Decimal("0")) + printed_value
+
+            if printed_value != expected:
+                report.warnings.append(
+                    f"{denom.device}: printed amount {printed_value} does not match "
+                    f"{quantity} x {denom.value} = {expected}."
+                )
 
 
 # ── numbers ──────────────────────────────────────────────────────────────────
