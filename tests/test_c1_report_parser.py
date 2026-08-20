@@ -271,6 +271,24 @@ Total        10        200.00
     assert r.machine_serial_number == "315190"
 
 
+def test_compact_x_rows_from_c1_check_style_are_parsed():
+    text = """
+NO:00003
+50X3=150
+20X4=80
+Coin 5.00
+Total 7 = 235.00
+Reject Qty 2
+"""
+    r = parse_report(text, PROFILE)
+    assert r.denominations == {"€50": 3, "€20": 4}
+    assert r.coin_amount == Decimal("5.00")
+    assert r.total_quantity == 7
+    assert r.total_value == Decimal("235.00")
+    assert r.reject_quantity == 2
+    assert r.warnings == []
+
+
 def test_profile_denominations_match_isa_plugin_config():
     """The ISA BPS C1 plugin config is the known-good machine configuration."""
     isa_codes = {
