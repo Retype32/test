@@ -223,6 +223,95 @@ async def test_auto_close_all_catalogs_marks_automatic_and_reopen_still_works(ap
             )
 
 
+async def test_correction_does_not_double_count_in_stats(api_client, web_client, tokens):
+    """A corrected transaction replaces the original: the superseded row must
+    drop out of slip counts and cash volume, or the books show the wrong
+    figure plus its own correction.
+
+    Scoped to a throwaway user so the assertions stay exact regardless of what
+    other modules have written into this catalog.
+    """
+    username = f"statscorr-{uuid.uuid4().hex[:8]}"
+    created_user = await api_client.post(
+        "/api/v1/auth/users",
+        json={"username": username, "password": "corrtest123", "role": "cashier"},
+        headers=_headers(tokens["admin"]),
+    )
+    assert created_user.status_code == 201
+
+    login = await api_client.post(
+        "/api/v1/auth/login", json={"username": username, "password": "corrtest123"}
+    )
+    user_token = login.json()["access_token"]
+    user_headers = {"Authorization": f"Bearer {user_token}", "X-Catalog": CATALOG}
+
+    a = await api_client.post(
+        "/api/v1/transactions/", json=_payload(_bag("DBLA"), total="100.00", expected_total="100.00"),
+        headers=user_headers,
+    )
+    await api_client.post(
+        "/api/v1/transactions/", json=_payload(_bag("DBLB"), total="200.00", expected_total="200.00"),
+        headers=user_headers,
+    )
+    txn_a_id = a.json()["transaction_id"]
+
+    params = {
+        "date_from": (date.today() - timedelta(days=1)).isoformat(),
+        "date_to": date.today().isoformat(),
+    }
+    before = await api_client.get(
+        "/api/v1/stats/processors/summary", params=params, headers=_headers(tokens["supervisor1"])
+    )
+    row_before = next(r for r in before.json() if r["username"] == username)
+    assert row_before["slip_count"] == 2
+    assert Decimal(row_before["cash_volume"]) == Decimal("300.00")
+
+    # Correct A from €100 up to €500.
+    await _web_login(web_client)
+    form = _correction_form("recount: was short by 400", **{"€100": 5})
+    corrected = await web_client.post(f"/web/transactions/{txn_a_id}/correct", data=form)
+    assert "Correction saved." in corrected.text
+
+    after = await api_client.get(
+        "/api/v1/stats/processors/summary", params=params, headers=_headers(tokens["supervisor1"])
+    )
+    row_after = next(r for r in after.json() if r["username"] == username)
+    # Still 2 slips (the correction replaces the original, it doesn't add to
+    # it), and the volume reflects the corrected figure: 500 + 200.
+    assert row_after["slip_count"] == 2
+    assert Decimal(row_after["cash_volume"]) == Decimal("700.00")
+
+
+async def test_superseded_transaction_excluded_from_report_export(api_client, web_client, tokens):
+    bag = _bag("RPTDUP")
+    create = await api_client.post(
+        "/api/v1/transactions/", json=_payload(bag), headers=_headers(tokens["cashier1"])
+    )
+    txn_id = create.json()["transaction_id"]
+
+    await _web_login(web_client)
+    form = _correction_form("fix count for report test", **{"€100": 3})
+    form["bag_number"] = bag  # correction keeps the same bag number
+    assert "Correction saved." in (await web_client.post(f"/web/transactions/{txn_id}/correct", data=form)).text
+
+    report = await web_client.get("/web/reports/download", params={"format": "csv"})
+    assert report.status_code == 200
+    body = report.content.decode("utf-8")
+    # Exactly one row for this bag -- the correction. The superseded original
+    # must not also appear, or the bag is counted twice in the export.
+    assert body.count(bag) == 1
+
+
+async def test_bulk_transfer_with_nothing_selected_shows_message(web_client):
+    await _web_login(web_client, catalog="dayshift")
+    r = await web_client.post(
+        "/web/transactions/bulk-transfer",
+        data={"new_business_date": (date.today() - timedelta(days=700)).isoformat(), "reason": "none selected"},
+    )
+    assert r.status_code == 200
+    assert "Select at least one transaction" in r.text
+
+
 async def test_admin_backup_creates_files(web_client):
     import os
     from backend.services import backup_service

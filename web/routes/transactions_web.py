@@ -92,14 +92,22 @@ async def bulk_transfer_transactions(
     db: WebCatalogDB,
     core_db: WebCoreDB,
     catalog_code: Annotated[CatalogCode, Depends(get_web_catalog_code)],
-    transaction_ids: list[str] = Form(...),
+    # Optional rather than required: submitting with nothing ticked is a
+    # normal mistake and deserves a readable message, not a raw 422.
+    transaction_ids: Optional[list[str]] = Form(None),
     new_business_date: date = Form(...),
     reason: str = Form(...),
+    date_from: Optional[str] = Form(None),
+    date_to: Optional[str] = Form(None),
+    customer_id: Optional[str] = Form(None),
+    location_id: Optional[str] = Form(None),
 ):
     service = TransactionService(db)
     error_message = None
     success_message = None
     try:
+        if not transaction_ids:
+            raise ValueError("Select at least one transaction to transfer.")
         ids = [uuid.UUID(tid) for tid in transaction_ids]
         result = await service.bulk_transfer_business_date(ids, new_business_date, reason, current_user.id)
         success_message = f"{len(result['moved'])} transaction(s) moved to {new_business_date}."
@@ -109,7 +117,9 @@ async def bulk_transfer_transactions(
         error_message = str(e)
 
     context = await _transactions_list_context(
-        current_user, db, core_db, catalog_code, error_message=error_message, success_message=success_message,
+        current_user, db, core_db, catalog_code,
+        date_from=date_from, date_to=date_to, customer_id=customer_id, location_id=location_id,
+        error_message=error_message, success_message=success_message,
     )
     return templates.TemplateResponse(request, "transactions.html", context)
 
@@ -125,6 +135,10 @@ async def transfer_cashier_transactions(
     business_date: date = Form(...),
     new_business_date: date = Form(...),
     reason: str = Form(...),
+    date_from: Optional[str] = Form(None),
+    date_to: Optional[str] = Form(None),
+    customer_id: Optional[str] = Form(None),
+    location_id: Optional[str] = Form(None),
 ):
     service = TransactionService(db)
     error_message = None
@@ -138,7 +152,9 @@ async def transfer_cashier_transactions(
         error_message = str(e)
 
     context = await _transactions_list_context(
-        current_user, db, core_db, catalog_code, error_message=error_message, success_message=success_message,
+        current_user, db, core_db, catalog_code,
+        date_from=date_from, date_to=date_to, customer_id=customer_id, location_id=location_id,
+        error_message=error_message, success_message=success_message,
     )
     return templates.TemplateResponse(request, "transactions.html", context)
 

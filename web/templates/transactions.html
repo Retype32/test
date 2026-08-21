@@ -41,6 +41,11 @@
 
 {% if is_admin %}
 <form method="post" action="/web/transactions/bulk-transfer" id="bulk-transfer-form">
+{# Carried through so the list comes back filtered the same way afterwards. #}
+<input type="hidden" name="date_from" value="{{ filters.date_from }}">
+<input type="hidden" name="date_to" value="{{ filters.date_to }}">
+<input type="hidden" name="customer_id" value="{{ filters.customer_id }}">
+<input type="hidden" name="location_id" value="{{ filters.location_id }}">
 <div class="card">
     <div class="card-header">BULK TRANSFER SELECTED</div>
     <div class="card-body">
@@ -131,7 +136,7 @@
                 <td><a href="/web/transactions/{{ t.transaction_id }}">View</a></td>
             </tr>
             {% else %}
-            <tr><td colspan="12" class="text-muted" style="text-align:center; padding:20px;">No transactions match the selected filters.</td></tr>
+            <tr><td colspan="{{ 13 if is_admin else 12 }}" class="text-muted" style="text-align:center; padding:20px;">No transactions match the selected filters.</td></tr>
             {% endfor %}
             </tbody>
         </table>
@@ -146,6 +151,10 @@
     <div class="card-header">TRANSFER ALL OF ONE CASHIER'S TRANSACTIONS</div>
     <div class="card-body">
         <form method="post" action="/web/transactions/transfer-cashier">
+            <input type="hidden" name="date_from" value="{{ filters.date_from }}">
+            <input type="hidden" name="date_to" value="{{ filters.date_to }}">
+            <input type="hidden" name="customer_id" value="{{ filters.customer_id }}">
+            <input type="hidden" name="location_id" value="{{ filters.location_id }}">
             <div class="form-row">
                 <div class="form-group">
                     <label>Cashier</label>

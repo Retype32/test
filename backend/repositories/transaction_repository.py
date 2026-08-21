@@ -133,6 +133,7 @@ class TransactionRepository:
         business_date: Optional[date] = None,
         limit: int = 500,
         offset: int = 0,
+        exclude_superseded: bool = False,
     ) -> list[Transaction]:
         query = (
             select(Transaction)
@@ -163,6 +164,8 @@ class TransactionRepository:
             conditions.append(Transaction.user_id == user_id)
         if business_date:
             conditions.append(Transaction.business_date == business_date)
+        if exclude_superseded:
+            conditions.append(Transaction.is_superseded.is_(False))
 
         if conditions:
             query = query.where(and_(*conditions))

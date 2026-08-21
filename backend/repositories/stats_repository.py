@@ -27,7 +27,14 @@ class StatsRepository:
                 func.min(Transaction.created_at).label("first_txn_at"),
                 func.max(Transaction.created_at).label("last_txn_at"),
             )
-            .where(Transaction.business_date >= date_from, Transaction.business_date <= date_to)
+            # Superseded rows are excluded: a corrected transaction replaces
+            # the original, so counting both would inflate slip counts and
+            # cash volume by the wrong figure the correction exists to undo.
+            .where(
+                Transaction.business_date >= date_from,
+                Transaction.business_date <= date_to,
+                Transaction.is_superseded.is_(False),
+            )
             .group_by(Transaction.user_id, Transaction.username, Transaction.business_date)
         )
         if user_id:

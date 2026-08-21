@@ -39,6 +39,9 @@ async def _fetch_enriched_transactions(
         date_from=parsed_from, date_to=parsed_to,
         customer_id=customer_id or None, location_id=location_id or None,
         limit=5000,
+        # A superseded transaction has been replaced by its correction;
+        # including it would double-count the bag in the exported totals.
+        exclude_superseded=True,
     )
 
     customer_service = CustomerService(db)
