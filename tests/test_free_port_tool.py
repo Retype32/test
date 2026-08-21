@@ -15,11 +15,12 @@ from pathlib import Path
 
 import pytest
 
+if sys.platform != "win32":
+    pytest.skip("Windows only (free_port.py loads ntdll/kernel32 at import time)", allow_module_level=True)
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
 import free_port as fp  # noqa: E402
-
-pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
 
 
 # ── the ctypes machinery ─────────────────────────────────────────────────────

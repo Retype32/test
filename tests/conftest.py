@@ -41,11 +41,20 @@ async def app():
     """Builds the FastAPI app against the temp databases and seeds demo data
     once for the whole test session. Bypasses the app's own lifespan (which
     only calls init_databases()/auto-seed) since we do the equivalent here
-    directly -- httpx's ASGITransport doesn't run lifespan events itself."""
+    directly -- httpx's ASGITransport doesn't run lifespan events itself.
+
+    Because the lifespan is bypassed, its shutdown-time engine.dispose()
+    calls never run either, so we dispose the engines explicitly at the end
+    of the test session -- otherwise SQLAlchemy warns that pooled
+    connections were garbage-collected instead of closed."""
     from database.seed import seed
     await seed()
     from backend.main import app as fastapi_app
-    return fastapi_app
+    yield fastapi_app
+    from backend.core.database import core_engine, _catalog_engines
+    await core_engine.dispose()
+    for _engine in _catalog_engines.values():
+        await _engine.dispose()
 
 
 @pytest_asyncio.fixture(scope="session")

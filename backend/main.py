@@ -9,7 +9,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 from hardware import open_shared_counter, close_shared_counter
 from .core.config import settings
-from .core.database import init_databases, CoreSessionLocal
+from .core.database import init_databases, CoreSessionLocal, core_engine, _catalog_engines
 from .api.routes import auth, customers, transactions, catalogs, eod, notifications, duplicates, stats
 from web.routes import (
     auth_web, catalog_web, dashboard_web, transactions_web, reports_web,
@@ -40,6 +40,14 @@ async def lifespan(app: FastAPI):
     await asyncio.to_thread(open_shared_counter)
     yield
     close_shared_counter()
+    # Cleanly release pooled DB connections on shutdown. Without this the
+    # engines opened in init_databases() are only ever reclaimed by garbage
+    # collection, which SQLAlchemy warns about and which does not close
+    # connections deterministically - harmless for local SQLite files but a
+    # real leak pattern were this ever pointed at Postgres.
+    await core_engine.dispose()
+    for _engine in _catalog_engines.values():
+        await _engine.dispose()
 
 
 app = FastAPI(
