@@ -1,8 +1,8 @@
 {% extends "wizard_base.html" %}
 {% block title %}New Transaction — Count Cash{% endblock %}
-{% block card_class %}wide{% endblock %}
+{% block card_class %}wide cash-window{% endblock %}
 {% block wizard_title %}Count Cash{% endblock %}
-{% block wizard_subtitle %}Enter counts manually or read them from the machine{% endblock %}
+{% block wizard_subtitle %}Machine batches and manual entries both add to the running pool{% endblock %}
 {% block content %}
 
 <div class="wizard-summary">
@@ -15,41 +15,65 @@
 
 <form method="post" action="/web/transactions/new/wizard/cash" id="cash-form">
 
-    <div class="machine-bar">
-        <button type="button" class="btn btn-sm btn-ghost" id="clear-counts-btn">Clear all</button>
-        <span id="machine-status" class="machine-status" role="status" aria-live="polite"></span>
+    <div class="cash-toolbar">
+        <div class="mode-toggle" role="group" aria-label="Manual entry mode">
+            <button type="button" class="mode-btn active" id="mode-notes-btn">Notes</button>
+            <button type="button" class="mode-btn" id="mode-value-btn">Value &euro;</button>
+        </div>
+        <button type="button" class="btn btn-sm btn-ghost reset-all-btn" id="reset-all-btn"
+                title="Reset the whole transaction to zero (or press F)">
+            <kbd>F</kbd> Reset transaction
+        </button>
+        <span class="machine-status" id="machine-status" role="status" aria-live="polite"></span>
     </div>
+    <p class="text-faint" style="font-size:var(--t-xs); margin: -8px 0 var(--s-4);">
+        Type a number and press <kbd>Enter</kbd> to add it to a line (a leading <kbd>-</kbd> subtracts) &middot;
+        <kbd>Delete</kbd> zeroes just that line &middot; <kbd>F</kbd> zeroes the whole transaction.
+    </p>
 
-    <div class="denom-panel">
-        <div>
-            <div class="denom-list" role="group" aria-label="Denomination counts">
-                {% for field, label in denom_fields %}
-                <div class="denom-row" id="{{ field }}-row">
-                    <span class="denom-chip">{{ label }}{% if field == "count_coins" %} (bulk &euro;){% endif %}</span>
-                    <label class="visually-hidden" for="{{ field }}">{{ label }} count</label>
-                    <input type="number" min="0" step="1" name="{{ field }}" id="{{ field }}"
-                           value="{{ form_values.get(field, 0) }}" class="denom-input num"
-                           inputmode="numeric" autocomplete="off"
-                           {% if field == "count_coins" %}title="Total coin value, to the nearest euro (not a piece count)"{% endif %}>
-                    <span class="denom-value num" id="{{ field }}-value">&euro;0.00</span>
+    <div class="pool-panel">
+        <div class="pool-list" role="group" aria-label="Denomination pool">
+            {% for field, label in denom_fields %}
+            {% set is_bulk = field == "count_coins" %}
+            <div class="pool-row" id="{{ field }}-row">
+                <span class="pool-chip">{{ label }}{% if is_bulk %}<small>bulk &euro;</small>{% endif %}</span>
+                <div class="pool-readout num" id="{{ field }}-readout">
+                    <span class="pool-value" id="{{ field }}-value">&euro;0.00</span>
+                    {% if not is_bulk %}<span class="pool-notes" id="{{ field }}-notes">0 notes</span>{% endif %}
                 </div>
-                {% endfor %}
+                <div class="pool-entry">
+                    <label class="visually-hidden" for="{{ field }}-entry">Add to {{ label }}</label>
+                    <input type="text" inputmode="decimal" autocomplete="off" class="entry-input"
+                           id="{{ field }}-entry" placeholder="{{ 'value' if is_bulk else 'notes' }}">
+                </div>
+                <span class="entry-hint" id="{{ field }}-hint"></span>
+                <input type="hidden" name="{{ field }}" id="{{ field }}" value="0">
             </div>
+            {% endfor %}
         </div>
 
-        <aside class="total-panel" aria-live="polite">
-            <div class="total-head">Batch Total</div>
-            <div class="total-body">
-                <div class="total-value num" id="grand-total">&euro;0.00</div>
-                <div class="pieces"><span class="num" id="piece-count">0</span> notes &amp; coins</div>
+        <div class="pool-side">
+            <aside class="total-panel" aria-live="polite">
+                <div class="total-head">Transaction Pool</div>
+                <div class="total-body">
+                    <div class="total-value num" id="grand-total">&euro;0.00</div>
+                    <div class="pieces"><span class="num" id="piece-count">0</span> notes &amp; coins</div>
 
-                <div class="diff-row show" id="diff-row">
-                    <div class="diff-label">Against declared amount</div>
-                    <div class="diff-value num" id="diff-value">&euro;0.00</div>
-                    <div class="text-faint" style="font-size:var(--t-xs); margin-top:2px;" id="diff-note"></div>
+                    <div class="diff-row show" id="diff-row">
+                        <div class="diff-label">Against declared amount</div>
+                        <div class="diff-value num" id="diff-value">&euro;0.00</div>
+                        <div class="text-faint" style="font-size:var(--t-xs); margin-top:2px;" id="diff-note"></div>
+                    </div>
                 </div>
+            </aside>
+
+            <div class="activity-log">
+                <div class="total-head">Activity</div>
+                <ul class="log-list" id="log-list">
+                    <li class="log-empty">Nothing added yet.</li>
+                </ul>
             </div>
-        </aside>
+        </div>
     </div>
 
     <div class="btn-group" style="margin-top:var(--s-5);">
@@ -64,26 +88,56 @@
 
 {% block scripts %}
 <script>
+// Face value of one note/unit of each denomination. "Coins" is a bulk euro
+// amount rather than a piece count (face value 1), so the same integer pool
+// entry doubles as both "count" and "value" for that line with no special
+// casing anywhere below.
 const FIELD_VALUES = {"count_500": 500, "count_200": 200, "count_100": 100, "count_50": 50,
                        "count_20": 20, "count_10": 10, "count_5": 5, "count_coins": 1};
+const FIELD_LABELS = {"count_500": "€500", "count_200": "€200", "count_100": "€100",
+                       "count_50": "€50", "count_20": "€20", "count_10": "€10",
+                       "count_5": "€5", "count_coins": "Coins"};
 const DENOM_LABEL_TO_FIELD = {"€500": "count_500", "€200": "count_200", "€100": "count_100",
                                "€50": "count_50", "€20": "count_20", "€10": "count_10",
                                "€5": "count_5", "Coins": "count_coins"};
+const FIELDS = Object.keys(FIELD_VALUES);
 const DECLARED_AMOUNT = {{ draft.expected_total|float }};
 
-const euro = n => "€" + n.toLocaleString("en-IE", {minimumFractionDigits: 2,
-                                                   maximumFractionDigits: 2});
+// Seeded from whatever the server bounced back (only non-empty after a
+// validation error on a previous submit); a fresh visit starts every line
+// at zero.
+const initialPool = {
+    {% for field, label in denom_fields %}
+    "{{ field }}": {{ (form_values.get(field) or "0") | int(0) }},
+    {% endfor %}
+};
 
-function updateTotals() {
+const euro = n => (n < 0 ? "-" : "") + "€" + Math.abs(n).toLocaleString("en-IE",
+             {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+// ── The running pool ─────────────────────────────────────────────────────
+//
+// Everything the machine counts while this window is open, plus every
+// manual add/subtract, lands here on top of whatever was already counted.
+// Nothing here is ever overwritten wholesale — only ever added to,
+// subtracted from, or zeroed one line (or all lines) at a time.
+
+const pool = Object.fromEntries(FIELDS.map(f => [f, Math.max(0, initialPool[f] || 0)]));
+let mode = "notes";           // "notes" | "value" — how manual entries are read
+let batchCounter = 0;
+const activityLog = [];
+
+function renderPool() {
     let grandTotal = 0, pieces = 0;
-    Object.keys(FIELD_VALUES).forEach(field => {
-        const input = document.getElementById(field);
-        if (!input) return;
-        const count = Math.max(0, parseInt(input.value || "0", 10) || 0);
+    FIELDS.forEach(field => {
+        const count = pool[field];
         const value = count * FIELD_VALUES[field];
         grandTotal += value;
         pieces += count;
+        document.getElementById(field).value = count;
         document.getElementById(field + "-value").textContent = euro(value);
+        const notesEl = document.getElementById(field + "-notes");
+        if (notesEl) notesEl.textContent = count.toLocaleString("en-IE") + " notes";
         document.getElementById(field + "-row").classList.toggle("filled", count > 0);
     });
 
@@ -93,65 +147,235 @@ function updateTotals() {
     const diffEl   = document.getElementById("diff-value");
     const diffNote = document.getElementById("diff-note");
     const diff = grandTotal - DECLARED_AMOUNT;
-    diffEl.textContent = (diff > 0 ? "+" : "") + euro(diff).replace("€-", "-€");
+    diffEl.textContent = (diff > 0 ? "+" : "") + euro(diff);
     diffEl.className = "diff-value num " + (diff === 0 ? "ok" : (diff < 0 ? "bad" : "warn"));
     diffNote.textContent = diff === 0 ? "Balanced"
                          : (diff < 0 ? "Shortage against declared amount"
                                      : "Overage against declared amount");
 }
 
-const denomInputs = Array.from(document.querySelectorAll(".denom-input"));
-denomInputs.forEach((el, index) => {
-    el.addEventListener("input", updateTotals);
-    el.addEventListener("focus", () => el.select());
-    el.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === "ArrowDown") {
+function logEntry(source, text, delta) {
+    activityLog.unshift({source, text, delta, ts: new Date()});
+    if (activityLog.length > 300) activityLog.length = 300;
+    renderLog();
+}
+
+function renderLog() {
+    const list = document.getElementById("log-list");
+    if (!activityLog.length) {
+        list.innerHTML = '<li class="log-empty">Nothing added yet.</li>';
+        return;
+    }
+    const badgeClass = {machine: "badge-info", manual: "badge-muted", reset: "badge-error"};
+    list.innerHTML = activityLog.map(entry => {
+        const time = entry.ts.toLocaleTimeString("en-IE", {hour12: false});
+        const cls = entry.delta > 0 ? "pos" : (entry.delta < 0 ? "neg" : "");
+        const sign = entry.delta > 0 ? "+" : "";
+        return `<li class="log-row">
+            <span class="log-time">${time}</span>
+            <span class="badge badge-plain ${badgeClass[entry.source] || "badge-muted"}">${entry.source}</span>
+            <span class="log-text">${entry.text}</span>
+            <span class="log-delta num ${cls}">${entry.delta ? sign + euro(entry.delta) : "—"}</span>
+        </li>`;
+    }).join("");
+}
+
+function flashHint(field, message) {
+    const hint = document.getElementById(field + "-hint");
+    hint.textContent = message;
+    hint.classList.toggle("show", !!message);
+}
+
+// Adds (or, given a negative deltaNotes, subtracts) whole notes/units of one
+// denomination on top of that line's current pool.
+function applyDelta(field, deltaNotes, source, sourceLabel) {
+    const newTotal = pool[field] + deltaNotes;
+    if (newTotal < 0) {
+        flashHint(field, "That would take this line below zero.");
+        return false;
+    }
+    pool[field] = newTotal;
+    renderPool();
+    const label = FIELD_LABELS[field];
+    const value = deltaNotes * FIELD_VALUES[field];
+    const desc = field === "count_coins"
+        ? `${sourceLabel}: ${deltaNotes >= 0 ? "+" : ""}${euro(value)} in ${label}`
+        : `${sourceLabel}: ${deltaNotes >= 0 ? "+" : ""}${deltaNotes} × ${label}`;
+    logEntry(source, desc, value);
+    return true;
+}
+
+// ── Machine batches ──────────────────────────────────────────────────────
+// Every finished batch the machine reports (100/200/250 notes, whatever the
+// machine's own setting is) is added on top of the pool the instant it
+// arrives — never replaces what's already there.
+
+function addBatch(denominations) {
+    batchCounter += 1;
+    let anyAdded = false;
+    Object.entries(denominations).forEach(([label, count]) => {
+        const field = DENOM_LABEL_TO_FIELD[label];
+        if (!field || !count) return;
+        anyAdded = true;
+        applyDelta(field, count, "machine", `Machine batch #${batchCounter}`);
+    });
+    return anyAdded;
+}
+
+// ── Manual entry ─────────────────────────────────────────────────────────
+// Typing a number and pressing Enter adds it on top of that line's pool —
+// it never replaces the line. A leading "-" subtracts instead. The global
+// Notes/Value toggle decides whether the typed number is a note count or a
+// euro amount; either way it must resolve to a whole number of notes,
+// otherwise the entry is rejected rather than silently rounded.
+
+function commitEntry(field) {
+    const input = document.getElementById(field + "-entry");
+    const raw = input.value.trim();
+    flashHint(field, "");
+    if (raw === "") return;
+
+    const n = parseFloat(raw.replace(",", "."));
+    if (!isFinite(n)) {
+        flashHint(field, "Enter a number.");
+        return;
+    }
+
+    const face = FIELD_VALUES[field];
+    const rawNotes = mode === "value" ? n / face : n;
+    const deltaNotes = Math.round(rawNotes);
+    if (Math.abs(rawNotes - deltaNotes) > 1e-9) {
+        flashHint(field, mode === "value" ? `Enter a multiple of €${face}.` : "Whole notes only.");
+        return;
+    }
+    if (deltaNotes === 0) { input.value = ""; return; }
+
+    if (applyDelta(field, deltaNotes, "manual", "Manual")) {
+        input.value = "";
+    }
+}
+
+// Delete, focused on a line: zero that one denomination only (a soft reset
+// scoped to that line), leaving every other line's pool untouched.
+function resetLine(field) {
+    const removed = pool[field];
+    document.getElementById(field + "-entry").value = "";
+    flashHint(field, "");
+    if (removed === 0) return;
+    pool[field] = 0;
+    renderPool();
+    logEntry("reset", `Reset ${FIELD_LABELS[field]} to zero`, -(removed * FIELD_VALUES[field]));
+}
+
+// F: zero the entire transaction pool back to zero.
+function resetAll() {
+    const hadAnything = FIELDS.some(field => pool[field] !== 0);
+    FIELDS.forEach(field => {
+        pool[field] = 0;
+        document.getElementById(field + "-entry").value = "";
+        flashHint(field, "");
+    });
+    renderPool();
+    if (hadAnything) logEntry("reset", "F — whole transaction reset to zero", 0);
+}
+
+// ── Wire up the entry boxes ──────────────────────────────────────────────
+
+const entryInputs = FIELDS.map(f => document.getElementById(f + "-entry"));
+entryInputs.forEach((input, index) => {
+    input.dataset.field = FIELDS[index];
+    input.addEventListener("focus", () => input.select());
+    input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
             event.preventDefault();
-            (denomInputs[index + 1] || denomInputs[0]).focus();
+            commitEntry(input.dataset.field);
+            (entryInputs[index + 1] || entryInputs[0]).focus();
+        } else if (event.key === "ArrowDown") {
+            event.preventDefault();
+            (entryInputs[index + 1] || entryInputs[0]).focus();
         } else if (event.key === "ArrowUp") {
             event.preventDefault();
-            (denomInputs[index - 1] || denomInputs[denomInputs.length - 1]).focus();
+            (entryInputs[index - 1] || entryInputs[entryInputs.length - 1]).focus();
+        } else if (event.key === "Delete") {
+            event.preventDefault();
+            resetLine(input.dataset.field);
         }
     });
 });
 
-document.getElementById("clear-counts-btn").addEventListener("click", () => {
-    denomInputs.forEach(el => el.value = 0);
-    updateTotals();
-    denomInputs[0].focus();
+function setMode(next) {
+    mode = next;
+    document.getElementById("mode-notes-btn").classList.toggle("active", mode === "notes");
+    document.getElementById("mode-value-btn").classList.toggle("active", mode === "value");
+    entryInputs.forEach(input => {
+        input.placeholder = input.dataset.field === "count_coins" ? "value" : (mode === "value" ? "value" : "notes");
+    });
+}
+document.getElementById("mode-notes-btn").addEventListener("click", () => setMode("notes"));
+document.getElementById("mode-value-btn").addEventListener("click", () => setMode("value"));
+
+document.getElementById("reset-all-btn").addEventListener("click", resetAll);
+document.addEventListener("keydown", (event) => {
+    if (event.key.toLowerCase() !== "f" || event.ctrlKey || event.metaKey || event.altKey) return;
+    const active = document.activeElement;
+    if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) return;
+    event.preventDefault();
+    resetAll();
 });
 
-async function readMachine() {
-    const status = document.getElementById("machine-status");
-    status.className = "machine-status";
-    status.innerHTML = '<span class="spinner"></span> Waiting for the machine…';
-    try {
-        const resp = await fetch("/web/transactions/new/count", {method: "POST"});
-        const data = await resp.json();
-        if (data.error) {
-            status.className = "machine-status bad";
-            status.textContent = "Machine unavailable — enter counts manually. " + data.error;
-            return;
+// ── Continuous machine listening ─────────────────────────────────────────
+// The machine only ever hands back one finished batch per read, and each
+// read blocks until that batch (or its own idle timeout) arrives. As long
+// as this window is open, we just keep re-issuing that read: every batch
+// that comes back is added to the pool, then we immediately ask for the
+// next one — that's the "always listening" loop.
+
+let listening = true;
+
+function setStatus(kind, text) {
+    const el = document.getElementById("machine-status");
+    el.className = "machine-status" + (kind ? " " + kind : "");
+    el.innerHTML = (kind === "wait" ? '<span class="spinner"></span> ' : "") + text;
+}
+
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+async function pollLoop() {
+    while (listening) {
+        setStatus("wait", "Listening for the machine…");
+        let data;
+        try {
+            const resp = await fetch("/web/transactions/new/count", {method: "POST"});
+            data = await resp.json();
+        } catch (e) {
+            if (!listening) break;
+            setStatus("bad", "Machine connection lost — retrying…");
+            await sleep(4000);
+            continue;
         }
-        let received = 0;
-        Object.entries(data.denominations).forEach(([label, count]) => {
-            const field = DENOM_LABEL_TO_FIELD[label];
-            if (field) {
-                const input = document.getElementById(field);
-                if (input) { input.value = count; received += count; }
+        if (!listening) break;
+
+        if (data.denominations && Object.keys(data.denominations).length) {
+            const added = addBatch(data.denominations);
+            setStatus("ok", added ? `✓ Batch #${batchCounter} added to the pool.` : "Machine sent an empty batch.");
+        } else if (data.error) {
+            if (/no report received/i.test(data.error)) {
+                // A plain read timeout with nothing sent — just keep listening.
+                continue;
             }
-        });
-        updateTotals();
-        status.className = "machine-status ok";
-        status.textContent = "✓ Counted " + received + " pieces from the machine.";
-    } catch (e) {
-        status.className = "machine-status bad";
-        status.textContent = "Machine unavailable — enter counts manually.";
+            setStatus("bad", "Machine unavailable — enter counts manually. " + data.error);
+            await sleep(4000);
+        } else {
+            await sleep(1000);
+        }
     }
 }
 
-updateTotals();
-denomInputs[0].focus();
-readMachine();
+window.addEventListener("beforeunload", () => { listening = false; });
+
+renderPool();
+renderLog();
+entryInputs[0].focus();
+pollLoop();
 </script>
 {% endblock %}

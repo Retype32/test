@@ -99,12 +99,39 @@ def decimal_text(value: Optional[Decimal]) -> Optional[str]:
 
 
 def parse_decimal(value: str) -> Decimal:
+    """Parse a printed amount into a Decimal, tolerant of both thousands-
+    separator conventions (US: 1,234.56 / EU: 1.234,56) and of amounts with
+    no separator at all. Determines the decimal point by position (whichever
+    of ',' or '.' occurs LAST and is followed by exactly 1-2 digits) rather
+    than assuming one fixed convention, since real report formatting is not
+    yet confirmed and getting this wrong must never silently truncate a
+    cash total.
+    """
     value = value.strip().replace("EUR", "").replace("€", "").replace(" ", "")
-    if "," in value and "." not in value:
-        value = value.replace(",", ".")
-    elif "," in value and "." in value:
-        value = value.replace(",", "")
-    return Decimal(value)
+    if not value:
+        raise InvalidOperation("empty numeric value")
+
+    last_dot = value.rfind(".")
+    last_comma = value.rfind(",")
+    decimal_pos = max(last_dot, last_comma)
+
+    if decimal_pos == -1:
+        # No separators at all - plain integer or already-clean decimal.
+        return Decimal(value)
+
+    fraction_part = value[decimal_pos + 1:]
+    if fraction_part.isdigit() and len(fraction_part) in (1, 2):
+        # The last separator is a genuine decimal point; every earlier
+        # separator (if any) is a thousands grouping and gets dropped.
+        integer_part = re.sub(r"[.,]", "", value[:decimal_pos])
+        cleaned = f"{integer_part}.{fraction_part}"
+    else:
+        # No trailing 1-2 digit fraction (e.g. "1.234" as a bare grouped
+        # integer, or a malformed value) - every separator is a thousands
+        # grouping, there is no fractional part.
+        cleaned = re.sub(r"[.,]", "", value)
+
+    return Decimal(cleaned)
 
 
 def atomic_write_json(path: Path, payload: Any) -> None:
@@ -303,10 +330,13 @@ class ParsedReport:
 
 
 class ReportParser:
+    # Amount groups capture any run of digits/., so a thousands-separated
+    # value (e.g. "1.234,56" or "1,234.56") reaches parse_decimal intact
+    # instead of being cut off at the regex level.
     row_re = re.compile(
-        r"(?<!\d)(5|10|20|50|100|200|500)(?:[.,]00)?\s*[Xx]\s*(\d+)\s*=\s*([0-9]+(?:[.,][0-9]{1,2})?)"
+        r"(?<!\d)(5|10|20|50|100|200|500)(?:[.,]00)?\s*[Xx]\s*(\d+)\s*=\s*([0-9][0-9.,]*[0-9]|[0-9])"
     )
-    total_re = re.compile(r"(?i)\bTotal\s+(\d+)\s*=\s*([0-9]+(?:[.,][0-9]{1,2})?)")
+    total_re = re.compile(r"(?i)\bTotal\s+(\d+)\s*=\s*([0-9][0-9.,]*[0-9]|[0-9])")
     known_line_patterns = [
         re.compile(x, re.I) for x in (
             r"^NO\s*:", r"^\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2}:\d{2}$",
@@ -357,10 +387,10 @@ class ReportParser:
                 seen.add(key)
                 report.denominations.append(row)
 
-        match = re.search(r"(?i)\bSubTotal\s+([0-9]+(?:[.,][0-9]{1,2})?)", cleaned)
+        match = re.search(r"(?i)\bSubTotal\s+([0-9][0-9.,]*[0-9]|[0-9])", cleaned)
         if match:
             report.subtotal = parse_decimal(match.group(1))
-        match = re.search(r"(?i)\bCoin\s+([0-9]+(?:[.,][0-9]{1,2})?)", cleaned)
+        match = re.search(r"(?i)\bCoin\s+([0-9][0-9.,]*[0-9]|[0-9])", cleaned)
         if match:
             report.coin_amount = parse_decimal(match.group(1))
         match = cls.total_re.search(cleaned)

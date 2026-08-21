@@ -11,7 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from hardware import open_shared_counter, close_shared_counter
 from .core.config import settings
-from .core.database import init_databases, CoreSessionLocal
+from .core.database import init_databases, CoreSessionLocal, core_engine, _catalog_engines
 from .services.eod_scheduler import auto_close_all_catalogs
 from .api.routes import auth, customers, transactions, catalogs, eod, notifications, duplicates, stats
 from web.routes import (
@@ -52,6 +52,14 @@ async def lifespan(app: FastAPI):
 
     scheduler.shutdown(wait=False)
     close_shared_counter()
+    # Cleanly release pooled DB connections on shutdown. Without this the
+    # engines opened in init_databases() are only ever reclaimed by garbage
+    # collection, which SQLAlchemy warns about and which does not close
+    # connections deterministically - harmless for local SQLite files but a
+    # real leak pattern were this ever pointed at Postgres.
+    await core_engine.dispose()
+    for _engine in _catalog_engines.values():
+        await _engine.dispose()
 
 
 app = FastAPI(
