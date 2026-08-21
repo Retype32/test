@@ -231,7 +231,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -.01em; }
 ::selection { background: var(--gold-500); color: var(--navy-900); }
 
 /* Every figure that represents money or a count lines up by digit. */
-.num, .money, td.num, .stat-tile .value, .denom-value, .total-value,
+.num, .money, td.num, .stat-tile .value, .pool-value, .total-value,
 table.data td.num, input[type="number"] {
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum" 1, "lnum" 1;
@@ -698,57 +698,117 @@ table.data td strong { color: var(--fg); font-weight: 650; }
    Denomination entry — the cashier's main instrument
    -------------------------------------------------------------------------- */
 
-.denom-panel { display: grid; grid-template-columns: minmax(0,1fr) 300px; gap: var(--s-5); }
-@media (max-width: 1080px) { .denom-panel { grid-template-columns: 1fr; } }
+.cash-toolbar {
+    display: flex; align-items: center; gap: var(--s-3);
+    flex-wrap: wrap; margin-bottom: var(--s-4);
+    padding-bottom: var(--s-4); border-bottom: 1px dashed var(--line);
+}
 
-.denom-list { display: flex; flex-direction: column; gap: 6px; }
+.mode-toggle {
+    display: inline-flex; border: 1px solid var(--line-strong);
+    border-radius: var(--r-md); overflow: hidden;
+}
+.mode-toggle .mode-btn {
+    border: none; background: var(--bg-surface); color: var(--fg-muted);
+    padding: 6px 14px; font-size: var(--t-sm); font-weight: 650; cursor: pointer;
+    transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.mode-toggle .mode-btn + .mode-btn { border-left: 1px solid var(--line-strong); }
+.mode-toggle .mode-btn.active { background: var(--accent); color: var(--accent-fg); }
 
-.denom-row {
+.reset-all-btn { color: var(--bad-fg); }
+.reset-all-btn kbd { margin-right: 4px; }
+
+.pool-panel { display: grid; grid-template-columns: minmax(0,1fr) 340px; gap: var(--s-5); }
+@media (max-width: 1080px) { .pool-panel { grid-template-columns: 1fr; } }
+
+.pool-list { display: flex; flex-direction: column; gap: 8px; }
+
+.pool-row {
     display: grid;
-    /* Count field stays compact: a lone digit centred in a wide box is hard to
-       scan, and the value column earns the leftover width instead. */
-    grid-template-columns: 88px 132px 1fr;
+    grid-template-columns: 92px 1fr 150px;
+    grid-template-areas: "chip readout entry" "chip hint hint";
     align-items: center;
-    gap: var(--s-4);
-    padding: 7px var(--s-3);
+    gap: var(--s-2) var(--s-4);
+    padding: var(--s-3);
     border: 1px solid var(--line-soft);
     border-radius: var(--r-md);
     background: var(--bg-surface);
     transition: border-color var(--fast) var(--ease), background var(--fast) var(--ease),
                 box-shadow var(--fast) var(--ease);
 }
-.denom-row:hover { border-color: var(--line-strong); }
-.denom-row:focus-within {
+.pool-row:focus-within {
     border-color: var(--accent);
     box-shadow: var(--ring);
     background: var(--bg-raised);
 }
-.denom-row.filled { border-color: var(--accent); background: var(--info-bg); }
+.pool-row.filled { border-color: var(--accent); background: var(--info-bg); }
 
-.denom-chip {
-    display: inline-flex; align-items: center; justify-content: center;
-    height: 30px; border-radius: var(--r-sm);
+.pool-chip {
+    grid-area: chip;
+    display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 1px; height: 46px; border-radius: var(--r-sm);
     font-weight: 750; font-size: var(--t-md);
     background: var(--bg-inset); color: var(--fg);
     border: 1px solid var(--line);
     font-variant-numeric: tabular-nums;
 }
-.denom-row.filled .denom-chip {
+.pool-chip small {
+    font-size: 9px; font-weight: 650; letter-spacing: .4px;
+    text-transform: uppercase; color: var(--fg-faint);
+}
+.pool-row.filled .pool-chip {
     background: var(--accent); color: var(--accent-fg); border-color: transparent;
 }
+.pool-row.filled .pool-chip small { color: rgba(255,255,255,.72); }
 
-.denom-row input.denom-input {
-    width: 100%; height: 36px;
+.pool-readout { grid-area: readout; display: flex; align-items: baseline; gap: var(--s-3); flex-wrap: wrap; }
+.pool-readout .pool-value { font-size: var(--t-xl); font-weight: 700; color: var(--fg); }
+.pool-readout .pool-notes { font-size: var(--t-sm); color: var(--fg-muted); }
+.pool-row.filled .pool-readout .pool-value { color: var(--fg); }
+
+.pool-entry { grid-area: entry; }
+.pool-entry .entry-input {
+    width: 100%; height: 40px;
     font-size: var(--t-lg); font-weight: 650;
     text-align: center;
     border-radius: var(--r-sm);
     padding: 0 var(--s-2);
 }
-.denom-value {
-    text-align: right; font-size: var(--t-base); font-weight: 650;
-    color: var(--fg-muted); padding-right: var(--s-2);
+.entry-hint {
+    grid-area: hint;
+    font-size: var(--t-xs); color: var(--bad-fg); min-height: 14px;
+    text-align: right; visibility: hidden;
 }
-.denom-row.filled .denom-value { color: var(--fg); }
+.entry-hint.show { visibility: visible; }
+
+.pool-side { display: flex; flex-direction: column; gap: var(--s-5); }
+
+.activity-log {
+    background: var(--bg-raised);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+}
+.activity-log .log-list {
+    list-style: none; margin: 0; padding: var(--s-2);
+    max-height: 320px; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 2px;
+}
+.log-row {
+    display: grid; grid-template-columns: auto auto 1fr auto;
+    align-items: center; gap: var(--s-2);
+    padding: 6px var(--s-2); border-radius: var(--r-sm);
+    font-size: var(--t-xs);
+}
+.log-row:nth-child(odd) { background: var(--bg-inset); }
+.log-time { color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+.log-text { color: var(--fg-secondary); }
+.log-delta { font-weight: 700; font-variant-numeric: tabular-nums; }
+.log-delta.pos { color: var(--ok-fg); }
+.log-delta.neg { color: var(--bad-fg); }
+.log-empty { padding: var(--s-4); text-align: center; color: var(--fg-faint); font-size: var(--t-sm); list-style: none; }
 
 /* Running total */
 .total-panel {
@@ -794,13 +854,10 @@ table.data td strong { color: var(--fg); font-weight: 650; }
 .diff-value.bad { color: var(--bad-fg); }
 .diff-value.warn{ color: var(--warn-fg); }
 
-.machine-bar {
-    display: flex; align-items: center; gap: var(--s-3);
-    flex-wrap: wrap; margin-bottom: var(--s-4);
-    padding-bottom: var(--s-4); border-bottom: 1px dashed var(--line);
+.machine-status {
+    font-size: var(--t-sm); color: var(--fg-muted); display: flex;
+    align-items: center; gap: 6px; margin-left: auto;
 }
-.machine-status { font-size: var(--t-sm); color: var(--fg-muted); display: flex;
-                  align-items: center; gap: 6px; }
 .machine-status.ok  { color: var(--ok-fg); }
 .machine-status.bad { color: var(--bad-fg); }
 
@@ -904,6 +961,7 @@ kbd {
     transition: max-width var(--med) var(--ease);
 }
 .wizard-card.wide { max-width: 760px; }
+.wizard-card.wide.cash-window { max-width: 1200px; }
 .wizard-card .wizard-header {
     background: linear-gradient(150deg, var(--navy-800), var(--navy-600));
     padding: var(--s-5) var(--s-6) var(--s-5);
@@ -1002,12 +1060,12 @@ kbd {
     .sidebar a.nav-link.active::before { display: none; }
     .page-header { padding: var(--s-3) var(--s-4); position: static; }
     .content { padding: var(--s-4); }
-    .denom-panel { grid-template-columns: 1fr; }
+    .pool-panel { grid-template-columns: 1fr; }
     .total-panel { position: static; }
 }
 
 @media print {
-    .sidebar, .page-header .header-actions, .btn, .machine-bar { display: none !important; }
+    .sidebar, .page-header .header-actions, .btn, .cash-toolbar { display: none !important; }
     .card { box-shadow: none; border-color: #999; break-inside: avoid; }
     body { background: #fff; }
 }
