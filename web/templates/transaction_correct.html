@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Correct Transaction — {{ settings.display_name }}{% endblock %}
+{% block page_title %}Correct Transaction{% endblock %}
+{% block page_subtitle %}Supervisor &#9656; Transaction Viewer &#9656; Correct{% endblock %}
+{% block content %}
+
+{% if not txn %}
+{# error_message is already shown by base.html's global banner. #}
+<a class="btn" href="/web/transactions">&larr; Back to Transaction Viewer</a>
+{% elif not show_form %}
+<a class="btn" href="/web/transactions/{{ txn.transaction_id }}">&larr; Back to Transaction</a>
+{% else %}
+
+<div class="card">
+    <div class="card-header">ORIGINAL TRANSACTION</div>
+    <div class="card-body">
+        <table class="data">
+            <tr><td style="width:200px;"><strong>Transaction ID</strong></td><td>{{ txn.transaction_id }}</td></tr>
+            <tr><td><strong>Business Date</strong></td><td>{{ txn.business_date }}</td></tr>
+            <tr><td><strong>Processed By</strong></td><td>{{ txn.username }}</td></tr>
+            <tr><td><strong>Current Total</strong></td><td>&euro;{{ "%.2f"|format(txn.total_value) }}</td></tr>
+        </table>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">CORRECTED VALUES</div>
+    <div class="card-body">
+        <form method="post" action="/web/transactions/{{ txn.transaction_id }}/correct">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Customer ID</label>
+                    <input type="text" name="customer_id" value="{{ txn.customer_id }}" required>
+                </div>
+                <div class="form-group">
+                    <label>Location ID</label>
+                    <input type="text" name="location_id" value="{{ txn.location_id }}" required>
+                </div>
+                <div class="form-group">
+                    <label>Bag Number</label>
+                    <input type="text" name="bag_number" value="{{ txn.bag_number }}" required>
+                </div>
+                <div class="form-group">
+                    <label>Wallet ID</label>
+                    <input type="text" name="wallet_id" value="{{ txn.wallet_id or '' }}">
+                </div>
+                <div class="form-group">
+                    <label>Declared / Expected Total</label>
+                    <input type="text" name="expected_total" value="{{ txn.expected_total if txn.expected_total is not none else '' }}" placeholder="Leave blank if none">
+                </div>
+            </div>
+
+            <table class="data" style="margin-top:16px;">
+                <thead><tr><th>Denomination</th><th class="num">Count</th></tr></thead>
+                <tbody>
+                {% for label, count in denominations %}
+                <tr>
+                    <td>{{ label }}</td>
+                    <td class="num"><input type="number" min="0" name="count_{{ label }}" value="{{ count }}" style="width:100px; text-align:right;"></td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+
+            <div class="form-row" style="margin-top:16px;">
+                <div class="form-group" style="flex:1;">
+                    <label>Reason</label>
+                    <input type="text" name="reason" required placeholder="Why is this transaction being corrected?" style="width:100%;">
+                </div>
+                <div class="form-group">
+                    <button class="btn btn-gold" type="submit">SAVE CORRECTION</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<a class="btn" href="/web/transactions/{{ txn.transaction_id }}">&larr; Back to Transaction</a>
+
+{% endif %}
+{% endblock %}

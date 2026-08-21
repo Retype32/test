@@ -4,6 +4,8 @@ from fastapi import APIRouter, Request, Depends, Form
 from fastapi.responses import RedirectResponse
 from backend.core.catalogs import CatalogCode
 from backend.services.auth_service import AuthService
+from backend.services import backup_service
+from backend.repositories.core_audit_repository import CoreAuditRepository
 from backend.models.user import UserRole
 from backend.schemas.user import UserCreate, UserUpdate
 from ..templating import templates
@@ -105,6 +107,43 @@ async def edit_user(
         "error_message": error_message, "success_message": success_message,
     })
     return templates.TemplateResponse(request, "admin_users.html", context)
+
+
+@router.get("/backup")
+async def admin_backup_page(
+    request: Request,
+    current_user: WebAdminOnly,
+    catalog_db: WebCatalogDB,
+    catalog_code: Annotated[CatalogCode, Depends(get_web_catalog_code)],
+):
+    context = await build_nav_context(current_user, catalog_code, catalog_db)
+    context.update({"active_nav": "admin_backup", "backups": backup_service.list_backups()})
+    return templates.TemplateResponse(request, "admin_backup.html", context)
+
+
+@router.post("/backup")
+async def create_backup(
+    request: Request,
+    current_user: WebAdminOnly,
+    core_db: WebCoreDB,
+    catalog_db: WebCatalogDB,
+    catalog_code: Annotated[CatalogCode, Depends(get_web_catalog_code)],
+):
+    result = await backup_service.create_backup()
+    audit_repo = CoreAuditRepository(core_db)
+    await audit_repo.log(
+        current_user.id,
+        "DATABASE_BACKUP_CREATED",
+        f"Backed up {len(result['copied'])} database(s) to {result['dir']}",
+    )
+
+    context = await build_nav_context(current_user, catalog_code, catalog_db)
+    context.update({
+        "active_nav": "admin_backup",
+        "backups": backup_service.list_backups(),
+        "success_message": f"Backup created: {len(result['copied'])} database(s) saved to backups/{result['timestamp']}/.",
+    })
+    return templates.TemplateResponse(request, "admin_backup.html", context)
 
 
 @router.post("/users/{user_id}/delete")

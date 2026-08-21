@@ -56,6 +56,19 @@ class Transaction(CatalogBase):
     # stat (StatsService) without needing to parse AuditLog text.
     was_transferred: Mapped[bool] = mapped_column(nullable=False, default=False)
 
+    # Correction workflow (TransactionService.correct_transaction) is
+    # append-only: a wrong transaction is never edited or deleted. Instead a
+    # new row is created with original_transaction_id pointing back at it,
+    # and the original is flagged is_superseded so both remain in the record
+    # for audit purposes. correction_reason lives on the corrected row itself
+    # (in addition to the audit log entry) so the detail page can show it
+    # without a join.
+    original_transaction_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("transactions.transaction_id"), nullable=True, index=True
+    )
+    is_superseded: Mapped[bool] = mapped_column(nullable=False, default=False)
+    correction_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     customer: Mapped["Customer"] = relationship("Customer", back_populates="transactions")
     location: Mapped["Location"] = relationship("Location", back_populates="transactions")
     denominations: Mapped[list["Denomination"]] = relationship(

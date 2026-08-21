@@ -33,12 +33,42 @@
     </div>
 </div>
 
+{% if unbalanced_count %}
+<div class="alert alert-error" role="alert">
+    {{ unbalanced_count }} transaction{{ "s" if unbalanced_count != 1 else "" }} in this view {{ "are" if unbalanced_count != 1 else "is" }} <strong>NOT BALANCED</strong> — sorted to the top below.
+</div>
+{% endif %}
+
+{% if is_admin %}
+<form method="post" action="/web/transactions/bulk-transfer" id="bulk-transfer-form">
+<div class="card">
+    <div class="card-header">BULK TRANSFER SELECTED</div>
+    <div class="card-body">
+        <div class="form-row">
+            <div class="form-group">
+                <label>New Business Date</label>
+                <input type="date" name="new_business_date" required>
+            </div>
+            <div class="form-group" style="flex:1;">
+                <label>Reason</label>
+                <input type="text" name="reason" required placeholder="Why are the selected transactions being moved?" style="width:100%;">
+            </div>
+            <div class="form-group">
+                <button class="btn btn-gold" type="submit">TRANSFER SELECTED</button>
+            </div>
+        </div>
+        <p class="text-muted">Check the transactions you want to move in the table below, then submit here.</p>
+    </div>
+</div>
+{% endif %}
+
 <div class="card">
     <div class="card-header">{{ transactions|length }} RECORDS</div>
     <div class="card-body" style="padding:0;">
         <table class="data">
             <thead>
             <tr>
+                {% if is_admin %}<th><input type="checkbox" id="select-all" title="Select all"></th>{% endif %}
                 <th>Date / Time</th>
                 <th>Business Date</th>
                 <th>Processor</th>
@@ -55,7 +85,10 @@
             </thead>
             <tbody>
             {% for t in transactions %}
-            <tr>
+            <tr{% if t.balance_status.value == "NOT BALANCED" %} class="row-alert"{% endif %}>
+                {% if is_admin %}
+                <td><input type="checkbox" name="transaction_ids" value="{{ t.transaction_id }}" form="bulk-transfer-form" class="row-select"></td>
+                {% endif %}
                 <td>{{ t.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
                 <td>{{ t.business_date }}</td>
                 <td>{{ t.username }}</td>
@@ -86,6 +119,7 @@
                     {% else %}
                     <span class="badge badge-muted">PENDING</span>
                     {% endif %}
+                    {% if t.is_superseded %}<span class="badge badge-muted">CORRECTED</span>{% endif %}
                 </td>
                 <td>
                     {% if t.duplicate_flag_status == "confirmed_duplicate" %}
@@ -103,5 +137,57 @@
         </table>
     </div>
 </div>
+{% if is_admin %}
+</form>
+{% endif %}
 
+{% if is_admin %}
+<div class="card">
+    <div class="card-header">TRANSFER ALL OF ONE CASHIER'S TRANSACTIONS</div>
+    <div class="card-body">
+        <form method="post" action="/web/transactions/transfer-cashier">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Cashier</label>
+                    <select name="cashier_user_id" required>
+                        {% for c in cashiers %}
+                        <option value="{{ c.id }}">{{ c.username }}{% if not c.is_active %} (inactive){% endif %}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>From Business Date</label>
+                    <input type="date" name="business_date" required>
+                </div>
+                <div class="form-group">
+                    <label>To New Business Date</label>
+                    <input type="date" name="new_business_date" required>
+                </div>
+                <div class="form-group" style="flex:1;">
+                    <label>Reason</label>
+                    <input type="text" name="reason" required placeholder="Why are this cashier's transactions being moved?" style="width:100%;">
+                </div>
+                <div class="form-group">
+                    <button class="btn btn-gold" type="submit">TRANSFER ALL</button>
+                </div>
+            </div>
+        </form>
+        <p class="text-muted">Moves every transaction the selected cashier recorded on the given business date to a new date.</p>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    var selectAll = document.getElementById("select-all");
+    if (!selectAll) return;
+    selectAll.addEventListener("change", function () {
+        var boxes = document.querySelectorAll(".row-select");
+        boxes.forEach(function (box) { box.checked = selectAll.checked; });
+    });
+})();
+</script>
 {% endblock %}

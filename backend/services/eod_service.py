@@ -20,14 +20,15 @@ class EODService:
         closure = await self.repo.get_by_date(business_date)
         return closure is not None and closure.status == EODStatus.closed
 
-    async def close_day(self, business_date: date, closed_by_user_id: uuid.UUID) -> EODClosure:
+    async def close_day(
+        self, business_date: date, closed_by_user_id: Optional[uuid.UUID], automatic: bool = False
+    ) -> EODClosure:
         if await self.is_day_closed(business_date):
             raise ValueError(f"Business day {business_date} is already closed")
 
-        closure = await self.repo.close(business_date, closed_by_user_id)
-        await self.audit_repo.log(
-            closed_by_user_id, "EOD_CLOSED", f"business_date={business_date}"
-        )
+        closure = await self.repo.close(business_date, closed_by_user_id, automatic=automatic)
+        detail = f"business_date={business_date}" + (" (automatic)" if automatic else "")
+        await self.audit_repo.log(closed_by_user_id, "EOD_CLOSED", detail)
         return closure
 
     async def reopen_day(

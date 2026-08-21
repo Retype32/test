@@ -42,6 +42,7 @@
                 <td>
                     {% if c.status.value == "closed" %}
                     <span class="badge badge-error">CLOSED</span>
+                    {% if c.closed_automatically %}<span class="badge badge-muted">AUTO</span>{% endif %}
                     {% else %}
                     <span class="badge badge-success">REOPENED</span>
                     {% endif %}
