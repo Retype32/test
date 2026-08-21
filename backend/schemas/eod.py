@@ -18,7 +18,9 @@ class EODClosureResponse(BaseModel):
     id: uuid.UUID
     business_date: date
     status: EODStatus
-    closed_by_user_id: uuid.UUID
+    # Optional: an automatic (scheduler-driven) close has no acting user.
+    closed_by_user_id: Optional[uuid.UUID] = None
+    closed_automatically: bool = False
     closed_at: datetime
     reopened_by_user_id: Optional[uuid.UUID] = None
     reopened_at: Optional[datetime] = None

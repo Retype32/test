@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Backup — {{ settings.display_name }}{% endblock %}
+{% block page_title %}Database Backup{% endblock %}
+{% block page_subtitle %}Administrator &#9656; Backup{% endblock %}
+{% block content %}
+
+<div class="card">
+    <div class="card-header">BACKUP NOW</div>
+    <div class="card-body">
+        <p class="text-muted">
+            Copies all 5 databases (core + every catalog) to a new timestamped
+            folder under <code>backups/</code>. Safe to run at any time, including
+            while the system is in active use.
+        </p>
+        <form method="post" action="/web/admin/backup">
+            <button class="btn btn-primary" type="submit">BACKUP NOW</button>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">BACKUP HISTORY</div>
+    <div class="card-body" style="padding:0;">
+        <table class="data">
+            <thead><tr><th>Folder</th><th class="num">Files</th><th class="num">Total Size</th></tr></thead>
+            <tbody>
+            {% for b in backups %}
+            <tr>
+                <td>{{ b.name }}</td>
+                <td class="num">{{ b.file_count }}</td>
+                <td class="num">{{ "%.1f"|format(b.total_size_bytes / 1024) }} KB</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" class="text-muted" style="text-align:center; padding:20px;">No backups yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}

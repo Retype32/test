@@ -16,18 +16,25 @@ class EODRepository:
         )
         return result.scalar_one_or_none()
 
-    async def close(self, business_date: date, closed_by_user_id: uuid.UUID) -> EODClosure:
+    async def close(
+        self, business_date: date, closed_by_user_id: Optional[uuid.UUID], automatic: bool = False
+    ) -> EODClosure:
         existing = await self.get_by_date(business_date)
         if existing:
             existing.status = EODStatus.closed
             existing.closed_by_user_id = closed_by_user_id
             existing.closed_at = datetime.now(timezone.utc)
+            existing.closed_automatically = automatic
             existing.reopened_by_user_id = None
             existing.reopened_at = None
             existing.reopen_reason = None
             closure = existing
         else:
-            closure = EODClosure(business_date=business_date, closed_by_user_id=closed_by_user_id)
+            closure = EODClosure(
+                business_date=business_date,
+                closed_by_user_id=closed_by_user_id,
+                closed_automatically=automatic,
+            )
             self.db.add(closure)
 
         await self.db.flush()

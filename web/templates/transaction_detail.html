@@ -8,6 +8,22 @@
 <div class="alert alert-error">Transaction not found.</div>
 {% else %}
 
+{% if txn.original_transaction_id %}
+<div class="alert alert-warning">
+    This transaction is a <strong>correction</strong> of
+    <a href="/web/transactions/{{ txn.original_transaction_id }}">transaction {{ txn.original_transaction_id }}</a>.
+    {% if txn.correction_reason %}Reason: {{ txn.correction_reason }}{% endif %}
+</div>
+{% endif %}
+{% if txn.is_superseded %}
+<div class="alert alert-warning">
+    This transaction has been <strong>corrected</strong> and replaced.
+    {% for c in corrections %}
+    See <a href="/web/transactions/{{ c.transaction_id }}">the correction</a>.
+    {% endfor %}
+</div>
+{% endif %}
+
 <div class="card">
     <div class="card-header">TRANSACTION INFORMATION</div>
     <div class="card-body">
@@ -57,6 +73,16 @@
         </table>
     </div>
 </div>
+
+{% if can_correct %}
+<div class="card">
+    <div class="card-header">CORRECT THIS TRANSACTION</div>
+    <div class="card-body">
+        <p class="text-muted">Fixes a wrong count or a data-entry mistake. The original transaction is kept and marked as corrected; a new transaction is created with the fixed values.</p>
+        <a class="btn btn-gold" href="/web/transactions/{{ txn.transaction_id }}/correct">CORRECT TRANSACTION</a>
+    </div>
+</div>
+{% endif %}
 
 {% if is_admin %}
 <div class="card">

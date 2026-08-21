@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, case
 from sqlalchemy.orm import selectinload
 from ..models.transaction import Transaction, Denomination, AuditLog, BalanceStatus
 
@@ -25,6 +25,9 @@ class TransactionRepository:
         balance_status: BalanceStatus,
         denominations: list[dict],
         wallet_id: Optional[str] = None,
+        business_date: Optional[date] = None,
+        original_transaction_id: Optional[uuid.UUID] = None,
+        correction_reason: Optional[str] = None,
     ) -> Transaction:
         txn = Transaction(
             user_id=user_id,
@@ -36,7 +39,11 @@ class TransactionRepository:
             total_value=total_value,
             expected_total=expected_total,
             balance_status=balance_status,
+            original_transaction_id=original_transaction_id,
+            correction_reason=correction_reason,
         )
+        if business_date is not None:
+            txn.business_date = business_date
         self.db.add(txn)
         await self.db.flush()
 
@@ -90,6 +97,20 @@ class TransactionRepository:
             txn.duplicate_flag_status = status
             await self.db.flush()
 
+    async def set_superseded(self, transaction_id: uuid.UUID):
+        txn = await self.get_by_id(transaction_id)
+        if txn:
+            txn.is_superseded = True
+            await self.db.flush()
+
+    async def list_corrections(self, original_transaction_id: uuid.UUID) -> list[Transaction]:
+        result = await self.db.execute(
+            select(Transaction)
+            .where(Transaction.original_transaction_id == original_transaction_id)
+            .order_by(Transaction.created_at.desc())
+        )
+        return list(result.scalars().all())
+
     async def get_by_id(self, transaction_id: uuid.UUID) -> Optional[Transaction]:
         result = await self.db.execute(
             select(Transaction)
@@ -120,7 +141,13 @@ class TransactionRepository:
                 selectinload(Transaction.location),
                 selectinload(Transaction.denominations),
             )
-            .order_by(Transaction.created_at.desc())
+            # NOT BALANCED transactions sort first so they're visible the
+            # moment the viewer is opened, with no filter or extra click
+            # needed to find them.
+            .order_by(
+                case((Transaction.balance_status == BalanceStatus.not_balanced, 0), else_=1),
+                Transaction.created_at.desc(),
+            )
         )
 
         conditions = []

@@ -603,6 +603,7 @@ table.data td {
 table.data tbody tr:last-child td { border-bottom: none; }
 table.data tbody tr { transition: background var(--fast) var(--ease); }
 table.data tbody tr:nth-child(even) td { background: var(--bg-sunken); }
+table.data tbody tr.row-alert td { background: var(--bad-bg); }
 table.data tbody tr:hover td { background: var(--bg-hover); }
 td.num, th.num { text-align: right; }
 table.data td strong { color: var(--fg); font-weight: 650; }

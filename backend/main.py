@@ -7,9 +7,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.exception_handlers import http_exception_handler
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from hardware import open_shared_counter, close_shared_counter
 from .core.config import settings
 from .core.database import init_databases, CoreSessionLocal, core_engine, _catalog_engines
+from .services.eod_scheduler import auto_close_all_catalogs
 from .api.routes import auth, customers, transactions, catalogs, eod, notifications, duplicates, stats
 from web.routes import (
     auth_web, catalog_web, dashboard_web, transactions_web, reports_web,
@@ -38,7 +41,16 @@ async def lifespan(app: FastAPI):
     await init_databases()
     await _auto_seed()
     await asyncio.to_thread(open_shared_counter)
+
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(
+        auto_close_all_catalogs, CronTrigger(hour=0, minute=0), id="eod_auto_close", replace_existing=True
+    )
+    scheduler.start()
+
     yield
+
+    scheduler.shutdown(wait=False)
     close_shared_counter()
     # Cleanly release pooled DB connections on shutdown. Without this the
     # engines opened in init_databases() are only ever reclaimed by garbage
