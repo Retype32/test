@@ -18,17 +18,18 @@ def _connect_args(url: str) -> dict:
     return {"check_same_thread": False} if _is_sqlite(url) else {}
 
 
-def _pool_kwargs(url: str) -> dict:
+def _pool_kwargs(url: str, size: int) -> dict:
     # SQLAlchemy's sqlite+aiosqlite dialect defaults to NullPool (a fresh
     # connection per checkout, no reuse) rather than pooling connections at
     # all. Once WAL mode (below) lets multiple readers run alongside the one
     # writer instead of queuing behind it, an actual connection pool lets
     # that concurrency be used instead of paying full connection-open cost
-    # on every request. Sized for ~40 concurrent users per catalog with
-    # headroom.
+    # on every request. `size` should be at least as big as this engine's
+    # concurrency-limit semaphore (below) -- otherwise the pool itself
+    # becomes the bottleneck before that semaphore ever matters.
     if not _is_sqlite(url):
         return {}
-    return {"poolclass": AsyncAdaptedQueuePool, "pool_size": 40, "max_overflow": 20}
+    return {"poolclass": AsyncAdaptedQueuePool, "pool_size": size, "max_overflow": size // 2}
 
 
 def _configure_sqlite_engine(engine: AsyncEngine) -> None:
@@ -46,7 +47,8 @@ def _configure_sqlite_engine(engine: AsyncEngine) -> None:
     threads show up, and letting dozens pile onto one file lock at once (one
     OS thread per aiosqlite connection) creates a thundering herd that's
     *slower* than fast-failing was, not faster -- see
-    _DB_CONCURRENCY_LIMIT below, which is what actually keeps this bounded.
+    _CATALOG_DB_CONCURRENCY_LIMIT / _CORE_DB_CONCURRENCY_LIMIT below, which
+    are what actually keep this bounded.
 
     synchronous=NORMAL is the standard pairing with WAL: still safe against
     an application crash (the failure mode that matters here), it only
@@ -63,16 +65,24 @@ def _configure_sqlite_engine(engine: AsyncEngine) -> None:
 
 
 # Caps how many requests can hold a live session against one SQLite database
-# (core, or a single catalog) at the same time -- reads and writes alike.
-# Without this, concurrency beyond what SQLite's single writer can actually
-# drain doesn't queue politely; it turns into dozens of OS threads all
-# retrying the same file lock via busy_timeout at once, which measured
-# *worse* than no fix at all (higher latency, more timeouts) once
-# concurrency passed this level. An in-process asyncio.Semaphore queues
-# fairly and cheaply instead, and is sized right at this app's target load:
-# comfortably around 30-40 concurrent users per catalog. Not needed for
-# Postgres, which doesn't share SQLite's single-writer limitation.
-_DB_CONCURRENCY_LIMIT = 30
+# at the same time -- reads and writes alike. Without this, concurrency
+# beyond what SQLite's single writer can actually drain doesn't queue
+# politely; it turns into dozens of OS threads all retrying the same file
+# lock via busy_timeout at once, which measured *worse* than no fix at all
+# (higher latency, more timeouts) once concurrency passed this level. An
+# in-process asyncio.Semaphore queues fairly and cheaply instead. Not needed
+# for Postgres, which doesn't share SQLite's single-writer limitation.
+#
+# Each catalog only ever serves its own users, so 30-40 comfortably covers
+# this app's per-catalog target. core.db is different: every catalog's users
+# share it (it holds accounts and login/audit history), so a login burst
+# across every FI at once lands there together -- capping it at the same 30
+# measured a handful of failures under 4 FIs x 20 users logging in
+# simultaneously (80 at once). Sized higher accordingly; its transactions
+# are also much cheaper (one read, one small audit-log insert) than a
+# catalog write, so a bigger cap here is cheap.
+_CATALOG_DB_CONCURRENCY_LIMIT = 30
+_CORE_DB_CONCURRENCY_LIMIT = 120
 
 
 class CoreBase(DeclarativeBase):
@@ -87,12 +97,12 @@ core_engine = create_async_engine(
     settings.database_url_core,
     echo=settings.debug,
     connect_args=_connect_args(settings.database_url_core),
-    **_pool_kwargs(settings.database_url_core),
+    **_pool_kwargs(settings.database_url_core, size=_CORE_DB_CONCURRENCY_LIMIT),
 )
 if _is_sqlite(settings.database_url_core):
     _configure_sqlite_engine(core_engine)
 
-_core_db_semaphore = asyncio.Semaphore(_DB_CONCURRENCY_LIMIT) if _is_sqlite(settings.database_url_core) else None
+_core_db_semaphore = asyncio.Semaphore(_CORE_DB_CONCURRENCY_LIMIT) if _is_sqlite(settings.database_url_core) else None
 
 CoreSessionLocal = async_sessionmaker(
     core_engine,
@@ -109,11 +119,12 @@ _catalog_db_semaphores: dict[CatalogCode, asyncio.Semaphore] = {}
 for _code in CatalogCode:
     _url = catalog_db_url(_code)
     _engine = create_async_engine(
-        _url, echo=settings.debug, connect_args=_connect_args(_url), **_pool_kwargs(_url)
+        _url, echo=settings.debug, connect_args=_connect_args(_url),
+        **_pool_kwargs(_url, size=_CATALOG_DB_CONCURRENCY_LIMIT),
     )
     if _is_sqlite(_url):
         _configure_sqlite_engine(_engine)
-        _catalog_db_semaphores[_code] = asyncio.Semaphore(_DB_CONCURRENCY_LIMIT)
+        _catalog_db_semaphores[_code] = asyncio.Semaphore(_CATALOG_DB_CONCURRENCY_LIMIT)
     _catalog_engines[_code] = _engine
     _catalog_sessionmakers[_code] = async_sessionmaker(
         _engine,
