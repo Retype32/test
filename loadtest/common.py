@@ -34,6 +34,10 @@ DENOM_VALUES = {"€500": 500, "€200": 200, "€100": 100, "€50": 50, "€20
 
 DEFAULT_CATALOG = "vms"
 
+# Matches backend/core/catalogs.py::CatalogCode -- each is a fully separate
+# database/dataset (a separate "FI" in the product's terms).
+ALL_CATALOGS = ["vms", "dayshift", "complete", "esnf"]
+
 
 async def login(client: httpx.AsyncClient, base_url: str, username: str, password: str) -> str:
     r = await client.post(f"{base_url}/api/v1/auth/login", json={"username": username, "password": password})
