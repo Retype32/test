@@ -55,17 +55,20 @@ intended a different repository or a future/parallel branch that contains
 the receipt engine, that needs to be pointed at explicitly; this assessment
 covers the repository actually present at the branch above.
 
-Mapping table used by all agents below:
+Mapping table used by all agents below (corrected after reading the actual
+model, `backend/models/transaction.py`):
 
 | Brief concept | Real equivalent in this repo |
 |---|---|
-| Bag / duplicate bag | Transaction / duplicate transaction (`duplicate_detection_service.py`) |
-| Batch / batch completion | EOD closure (`eod_service.py`, `eod.py`) |
-| Combined 3550 receipt PDF, reprints, generated-file history | Not present — out of scope, noted as a gap only if the business intends to add it |
+| Bag / duplicate bag | **`Transaction.bag_number`** (`backend/models/transaction.py:29`) is a real, first-class field — this is closer to the brief than initially assumed. But it has **no unique/database constraint**. Duplicate detection (`duplicate_detection_service.py:21`) is a **soft heuristic**: it compares `bag_number` (case/whitespace-insensitive) plus other fields against existing rows and, on a match, creates a `pending_review` flag + notification — it does **not** block insertion. Two identical bag numbers submitted concurrently both insert successfully; the flag is created after the fact, non-atomically. This is a direct, verified gap against the brief's required invariant ("at most one accepted record for a unique bag where uniqueness is required"). |
+| Batch / batch completion | EOD closure (`eod_service.py`, `backend/models/eod.py`) — closes all transactions for a `business_date`/catalog together, closest analog to "batch complete" |
+| Transaction reference | No separate human-readable reference field found — `transaction_id` (UUID4, PK) is the only identifier. No idempotency-key column/table anywhere in the schema. |
+| Correction/reversal | Real, and append-only by design: `Transaction.original_transaction_id` + `is_superseded` + `correction_reason` (`backend/models/transaction.py:59-70`); original row is flagged, never edited/deleted. Needs verification under concurrent double-submit. |
+| Header/detail reconciliation | Real: `Transaction.total_value`/`expected_total` vs. the `Denomination` child rows (`denomination`, `count`, `value`) — sum-of-denominations-vs-header is a concrete reconciliation check Agent 4's integrity checker should implement. |
+| Lifecycle state | `BalanceStatus` enum: `pending` / `BALANCED` / `NOT BALANCED` (`transaction.py:11-14`) plus `duplicate_flag_status` string field (`none`/`pending_review`/`confirmed_duplicate`/`dismissed`) — two semi-independent state fields on one row, worth checking for invalid combinations. |
+| Combined 3550 receipt PDF, reprints, generated-file history | Not present anywhere in the tree — out of scope, noted as a gap only if the business intends to add it |
 | Label generation | Not present — out of scope |
-| CSV import | Not present (export only) — out of scope unless the business wants it added |
-| Transaction reference | Transaction identifier/number generation in `transaction_service.py` |
-| Correction/reversal | `correct_transaction` flow (`e3a9c6d1f480_transaction_correction.py`, `transaction_service.py`) |
+| CSV import | Not present (export only, `reports/report_engine.py`) — out of scope unless the business wants it added |
 
 ## 3. Baseline automated test suite
 
