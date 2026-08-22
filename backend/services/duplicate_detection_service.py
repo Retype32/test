@@ -35,7 +35,7 @@ class DuplicateDetectionService:
         self.notification_service = NotificationService(db)
 
     async def check_for_duplicate(self, new_txn: Transaction) -> Optional[Transaction]:
-        candidates = await self.txn_repo.list_by_user_and_business_date(
+        candidates = await self.txn_repo.list_recent_by_user_and_business_date(
             new_txn.user_id, new_txn.business_date, exclude_transaction_id=new_txn.transaction_id
         )
 
