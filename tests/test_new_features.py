@@ -87,6 +87,53 @@ async def test_correct_transaction_supersedes_original(api_client, web_client, t
     assert "already been corrected" in again.text
 
 
+async def test_concurrent_corrections_of_same_transaction_do_not_both_succeed(api_client, tokens):
+    """Two supervisors submitting a correction for the same transaction at
+    nearly the same instant must not both win: the second must be rejected
+    cleanly, and exactly one correction must exist afterward. A plain
+    read-is_superseded-then-write has a window where both requests read
+    False before either commits; TransactionRepository.claim_for_correction
+    closes it with a single atomic UPDATE ... WHERE is_superseded = False.
+
+    Uses two separate web sessions (separate cookie jars / DB connections)
+    fired concurrently via asyncio.gather, so this exercises real concurrent
+    access rather than two sequential calls.
+    """
+    import asyncio
+    from httpx import AsyncClient, ASGITransport
+    from backend.main import app
+
+    create = await api_client.post(
+        "/api/v1/transactions/", json=_payload(_bag("RACE")), headers=_headers(tokens["cashier1"])
+    )
+    assert create.status_code == 201
+    txn_id = create.json()["transaction_id"]
+    correction_bag = _bag("RACE-FIXED")
+
+    async def submit_correction(count_100: int):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            await client.post("/web/login", data={"username": "admin", "password": "admin"})
+            await client.post("/web/catalog/select", data={"code": CATALOG})
+            form = _correction_form(f"race attempt {count_100}", **{"€100": count_100})
+            form["bag_number"] = correction_bag
+            return await client.post(f"/web/transactions/{txn_id}/correct", data=form)
+
+    results = await asyncio.gather(submit_correction(2), submit_correction(3))
+    texts = [r.text for r in results]
+
+    saved = sum("Correction saved." in t for t in texts)
+    refused = sum("already been corrected" in t for t in texts)
+    assert saved == 1, f"expected exactly one correction to succeed, got {saved}"
+    assert refused == 1, f"expected exactly one rejection, got {refused}"
+
+    # Confirm via the API (not page text) that exactly one correction row was
+    # actually persisted under the bag number both attempts raced to claim.
+    listing = await api_client.get("/api/v1/transactions/", headers=_headers(tokens["supervisor1"]))
+    correction_rows = [t for t in listing.json() if t["bag_number"] == correction_bag]
+    assert len(correction_rows) == 1, f"expected exactly one correction row, found {len(correction_rows)}"
+
+
 async def test_correct_transaction_requires_supervisor(api_client, web_client, tokens):
     create = await api_client.post(
         "/api/v1/transactions/", json=_payload(_bag("CORRPERM")), headers=_headers(tokens["cashier1"])

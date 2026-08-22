@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, case
+from sqlalchemy import select, and_, case, update
 from sqlalchemy.orm import selectinload
 from ..models.transaction import Transaction, Denomination, AuditLog, BalanceStatus
 
@@ -97,11 +97,27 @@ class TransactionRepository:
             txn.duplicate_flag_status = status
             await self.db.flush()
 
-    async def set_superseded(self, transaction_id: uuid.UUID):
-        txn = await self.get_by_id(transaction_id)
-        if txn:
-            txn.is_superseded = True
-            await self.db.flush()
+    async def claim_for_correction(self, transaction_id: uuid.UUID) -> Optional[Transaction]:
+        """Atomically flips is_superseded False -> True in one UPDATE, so two
+        concurrent correction requests can't both succeed against the same
+        original. Only the caller whose UPDATE actually matches a row (still
+        unsuperseded, still an original rather than a correction itself) has
+        won the claim; a second, near-simultaneous request finds 0 rows
+        affected and must be turned away rather than create a competing
+        correction. A plain read-then-write here would have the same race the
+        two callers are trying to avoid."""
+        result = await self.db.execute(
+            update(Transaction)
+            .where(
+                Transaction.transaction_id == transaction_id,
+                Transaction.is_superseded.is_(False),
+                Transaction.original_transaction_id.is_(None),
+            )
+            .values(is_superseded=True)
+        )
+        if result.rowcount == 0:
+            return None
+        return await self.get_by_id(transaction_id)
 
     async def list_corrections(self, original_transaction_id: uuid.UUID) -> list[Transaction]:
         result = await self.db.execute(

@@ -227,6 +227,20 @@ class TransactionService:
         ]
         balance_status = self.calculate_balance_status(data.total_value, data.expected_total)
 
+        # Atomically claim the original right before writing the correction,
+        # not at the top of this method: the is_superseded check above can go
+        # stale between two near-simultaneous requests for the same
+        # transaction, so it's this single UPDATE — not that earlier read —
+        # that actually decides which caller wins. Placed after every
+        # validation that can still fail (customer/location lookups) so a
+        # rejected correction never leaves the original claimed with no
+        # correction to show for it; if repo.create below still fails for
+        # some other reason, the claim rolls back with the rest of this
+        # request's session.
+        claimed = await self.repo.claim_for_correction(original.transaction_id)
+        if claimed is None:
+            raise ValueError("This transaction has already been corrected")
+
         # Corrections are append-only and never touch a closed business day's
         # transaction-creation gate (EODService.is_day_closed): they don't add
         # new activity to that day, they fix the record for a day that may
@@ -246,8 +260,6 @@ class TransactionService:
             original_transaction_id=original.transaction_id,
             correction_reason=reason,
         )
-
-        await self.repo.set_superseded(original.transaction_id)
 
         await self.audit_repo.log(
             supervisor_user_id,
