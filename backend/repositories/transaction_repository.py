@@ -1,12 +1,37 @@
 import uuid
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
 from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, case
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.exc import StaleDataError
 from ..models.transaction import Transaction, Denomination, AuditLog, BalanceStatus
+from ..models.idempotency import IdempotencyKey
+
+
+# Default idempotency-key lifetime -- 01_transaction_integrity.md §7
+# recommends 24-48h as enough to cover realistic client retry windows
+# without growing the table unboundedly.
+IDEMPOTENCY_KEY_TTL_HOURS = 48
+
+
+async def _conflict(db: AsyncSession, message: str) -> ValueError:
+    """Every StaleDataError/IntegrityError catch below needs the same
+    recovery step before it's safe to raise: the failed flush leaves the
+    session's transaction in a "pending rollback" state (confirmed
+    empirically -- a plain SELECT after an uncaught-and-unrolled-back
+    StaleDataError/IntegrityError raises PendingRollbackError), so any
+    caller that goes on to catch the resulting ValueError and keep using
+    the same request-scoped session (e.g. a web route re-rendering a form
+    after a conflict) would otherwise blow up on its very next query.
+    Rolling back here is safe precisely because nothing in this session has
+    committed yet (the request's single commit point is still ahead, in
+    get_catalog_db) -- discarding this attempt's uncommitted work and
+    nothing else."""
+    await db.rollback()
+    return ValueError(message)
 
 
 class TransactionRepository:
@@ -68,7 +93,15 @@ class TransactionRepository:
             return None
         txn.business_date = new_business_date
         txn.was_transferred = True
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except StaleDataError:
+            # H-2: this row was modified by another request between our read
+            # and this write (optimistic-locking version mismatch) -- a
+            # clean conflict, not a silent lost update.
+            raise await _conflict(
+                self.db, f"Transaction {transaction_id} was modified by another request; please retry"
+            )
         await self.db.refresh(txn)
         return txn
 
@@ -95,13 +128,23 @@ class TransactionRepository:
         txn = await self.get_by_id(transaction_id)
         if txn:
             txn.duplicate_flag_status = status
-            await self.db.flush()
+            try:
+                await self.db.flush()
+            except StaleDataError:
+                raise await _conflict(
+                    self.db, f"Transaction {transaction_id} was modified by another request; please retry"
+                )
 
     async def set_superseded(self, transaction_id: uuid.UUID):
         txn = await self.get_by_id(transaction_id)
         if txn:
             txn.is_superseded = True
-            await self.db.flush()
+            try:
+                await self.db.flush()
+            except StaleDataError:
+                raise await _conflict(
+                    self.db, f"Transaction {transaction_id} was modified by another request; please retry"
+                )
 
     async def list_corrections(self, original_transaction_id: uuid.UUID) -> list[Transaction]:
         result = await self.db.execute(
@@ -186,3 +229,47 @@ class AuditRepository:
             select(AuditLog).order_by(AuditLog.timestamp.desc()).limit(limit)
         )
         return list(result.scalars().all())
+
+
+class IdempotencyRepository:
+    """Backs the idempotency contract in
+    docs/production_readiness/01_transaction_integrity.md §6.1/§7 --
+    check-and-insert against idempotency_keys in the same request-scoped
+    session as the business write it protects. `key` here is always the
+    full scope-qualified composite string (see
+    TransactionService._idempotency_composite_key), never a bare
+    client-supplied value, so a lookup can never cross endpoints."""
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def get(self, composite_key: str) -> Optional[IdempotencyKey]:
+        result = await self.db.execute(
+            select(IdempotencyKey).where(IdempotencyKey.key == composite_key)
+        )
+        return result.scalar_one_or_none()
+
+    async def create(
+        self,
+        composite_key: str,
+        catalog: str,
+        scope: str,
+        transaction_id: uuid.UUID,
+        request_fingerprint: Optional[str] = None,
+    ) -> IdempotencyKey:
+        now = datetime.now(timezone.utc)
+        row = IdempotencyKey(
+            key=composite_key,
+            catalog=catalog,
+            scope=scope,
+            request_fingerprint=request_fingerprint,
+            transaction_id=transaction_id,
+            created_at=now,
+            expires_at=now + timedelta(hours=IDEMPOTENCY_KEY_TTL_HOURS),
+        )
+        self.db.add(row)
+        # A concurrent winner's row (same composite key) raises IntegrityError
+        # here -- callers (TransactionService) catch it, roll back, and
+        # re-fetch the winner's transaction_id via get() above.
+        await self.db.flush()
+        return row

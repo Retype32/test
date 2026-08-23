@@ -81,6 +81,21 @@ class DuplicateDetectionService:
     async def review_flag(
         self, flag_id: uuid.UUID, status: str, reviewed_by_user_id: uuid.UUID, notes: Optional[str] = None
     ):
+        flag = await self.duplicate_repo.get_by_id(flag_id)
+        if not flag:
+            raise ValueError(f"Duplicate flag {flag_id} not found")
+
+        # S-09: segregation of duties -- a supervisor reviewing a duplicate
+        # flag raised against their own transaction defeats the point of a
+        # second set of eyes. Plain ValueError (not a distinct exception
+        # type) deliberately: both callers of this service
+        # (backend/api/routes/duplicates.py, web/routes/duplicates_web.py)
+        # already catch ValueError for every other rejection this method
+        # raises, so this guard needs no route change to take effect.
+        flagged_txn = await self.txn_repo.get_by_id(flag.transaction_id)
+        if flagged_txn and flagged_txn.user_id == reviewed_by_user_id:
+            raise ValueError("A supervisor cannot review a duplicate flag on their own transaction")
+
         flag = await self.duplicate_repo.set_status(flag_id, status, reviewed_by_user_id)
         if not flag:
             raise ValueError(f"Duplicate flag {flag_id} not found")

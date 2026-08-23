@@ -77,3 +77,10 @@ class TransactionFilter(BaseModel):
 class TransactionTransferRequest(BaseModel):
     new_business_date: date
     reason: str = Field(..., min_length=1)
+
+
+class TransactionCorrectRequest(TransactionCreate):
+    # M-2: REST counterpart to the web-only correction form
+    # (transaction_correct.html) -- same shape as TransactionCreate plus the
+    # reason TransactionService.correct_transaction requires.
+    reason: str = Field(..., min_length=1)

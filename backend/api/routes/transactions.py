@@ -1,12 +1,20 @@
 import uuid
 from datetime import datetime, date
-from typing import Optional
-from fastapi import APIRouter, HTTPException, Query
+from typing import Annotated, Optional
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from ...services.transaction_service import TransactionService
-from ...schemas.transaction import TransactionCreate, TransactionResponse, TransactionTransferRequest
-from ..deps import CurrentUser, SupervisorOrAbove, AdminOnly, CatalogDB
+from ...schemas.transaction import (
+    TransactionCreate, TransactionResponse, TransactionTransferRequest, TransactionCorrectRequest,
+)
+from ...core.catalogs import CatalogCode
+from ..deps import CurrentUser, SupervisorOrAbove, AdminOnly, CatalogDB, get_catalog_code
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
+
+# Optional client-supplied retry-safety key (C-1 / consolidated plan §7).
+# Declared once and reused on every state-changing route below so both
+# surfaces (create, correct) share one contract.
+IdempotencyKeyHeader = Annotated[Optional[str], Header(alias="Idempotency-Key")]
 
 
 @router.post("/", response_model=TransactionResponse, status_code=201)
@@ -14,10 +22,21 @@ async def create_transaction(
     data: TransactionCreate,
     db: CatalogDB,
     current_user: CurrentUser,
+    response: Response,
+    catalog_code: Annotated[CatalogCode, Depends(get_catalog_code)],
+    idempotency_key: IdempotencyKeyHeader = None,
 ):
     service = TransactionService(db)
     try:
-        txn = await service.create_transaction(current_user.id, current_user.username, data)
+        txn = await service.create_transaction(
+            current_user.id, current_user.username, data,
+            idempotency_key=idempotency_key, catalog=catalog_code.value,
+        )
+        # §7: "a duplicate key within scope returns the previously-created
+        # transaction (200), not a new insert" -- overrides the route's
+        # default 201 only for that replay case.
+        if getattr(txn, "_idempotent_replay", False):
+            response.status_code = 200
         txn_full = await service.get_transaction(txn.transaction_id)
         return TransactionResponse.model_validate(txn_full)
     except ValueError as e:
@@ -80,3 +99,39 @@ async def transfer_transaction(
     except ValueError as e:
         status_code = 404 if "not found" in str(e) else 409
         raise HTTPException(status_code=status_code, detail=str(e))
+
+
+@router.post("/{transaction_id}/correct", response_model=TransactionResponse, status_code=201)
+async def correct_transaction(
+    transaction_id: uuid.UUID,
+    data: TransactionCorrectRequest,
+    db: CatalogDB,
+    current_user: SupervisorOrAbove,
+    response: Response,
+    catalog_code: Annotated[CatalogCode, Depends(get_catalog_code)],
+    idempotency_key: IdempotencyKeyHeader = None,
+):
+    # M-2: correct_transaction was previously reachable only from the web
+    # portal (web/routes/transactions_web.py) -- this gives any pure-API
+    # client the same capability, with the same idempotency-key contract as
+    # create_transaction.
+    service = TransactionService(db)
+    try:
+        txn = await service.correct_transaction(
+            transaction_id, data, data.reason, current_user.id,
+            idempotency_key=idempotency_key, catalog=catalog_code.value,
+        )
+        if getattr(txn, "_idempotent_replay", False):
+            response.status_code = 200
+        return TransactionResponse.model_validate(txn)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        message = str(e)
+        if "not found" in message:
+            status_code = 404
+        elif "already been corrected" in message or "already corrected by another request" in message:
+            status_code = 409
+        else:
+            status_code = 400
+        raise HTTPException(status_code=status_code, detail=message)

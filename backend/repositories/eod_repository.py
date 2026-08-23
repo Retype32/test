@@ -3,6 +3,8 @@ from datetime import date, datetime, timezone
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm.exc import StaleDataError
 from ..models.eod import EODClosure, EODStatus
 
 
@@ -37,7 +39,23 @@ class EODRepository:
             )
             self.db.add(closure)
 
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            # H-1: two concurrent first-time closes for the same
+            # business_date both passed EODService.is_day_closed()'s read
+            # before either committed; the eod_closures.business_date
+            # unique index rejects the loser's INSERT here. Same rollback
+            # requirement as the StaleDataError case below -- the failed
+            # flush leaves the session unusable until rolled back.
+            await self.db.rollback()
+            raise ValueError(f"Business day {business_date} is already closed")
+        except StaleDataError:
+            # The existing-row (re-close/re-open-then-close) branch above
+            # is a plain optimistic-locking update -- someone else changed
+            # this same closure row between our read and this write.
+            await self.db.rollback()
+            raise ValueError(f"Business day {business_date} is already closed")
         await self.db.refresh(closure)
         return closure
 
@@ -52,7 +70,11 @@ class EODRepository:
         closure.reopened_by_user_id = reopened_by_user_id
         closure.reopened_at = datetime.now(timezone.utc)
         closure.reopen_reason = reason
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except StaleDataError:
+            await self.db.rollback()
+            raise ValueError(f"Business day {business_date} was changed by another request; please retry")
         await self.db.refresh(closure)
         return closure
 
