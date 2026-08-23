@@ -2,9 +2,19 @@ import uuid
 from datetime import datetime, timezone, date
 from decimal import Decimal
 from typing import Optional
-from sqlalchemy import String, DateTime, Date, Numeric, ForeignKey, Enum as SAEnum, Integer, Text
+from sqlalchemy import (
+    String, DateTime, Date, Numeric, ForeignKey, Enum as SAEnum, Integer, Text,
+    Index, CheckConstraint, text as sql_text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from ..core.database import CatalogBase
+# Registers idempotency_keys with CatalogBase.metadata via this module --
+# transaction.py is already imported everywhere CatalogBase.metadata needs
+# to be complete (alembic_catalog/env.py, every service/repository that
+# imports Transaction), so importing it here means idempotency_keys is
+# always created/migrated alongside the tables it protects with no separate
+# import wiring needed anywhere else.
+from .idempotency import IdempotencyKey  # noqa: F401
 import enum
 
 
@@ -16,6 +26,30 @@ class BalanceStatus(str, enum.Enum):
 
 class Transaction(CatalogBase):
     __tablename__ = "transactions"
+    __table_args__ = (
+        # H-3 / consolidated plan §5.3: at most one live correction per
+        # original row, enforced at the DB level regardless of any
+        # application-level TOCTOU race. Partial (WHERE ... IS NOT NULL) so
+        # the many rows that are *not* corrections (NULL) never collide with
+        # each other under the unique index.
+        Index(
+            "ix_transactions_original_transaction_id_unique",
+            "original_transaction_id",
+            unique=True,
+            sqlite_where=sql_text("original_transaction_id IS NOT NULL"),
+            postgresql_where=sql_text("original_transaction_id IS NOT NULL"),
+        ),
+        # PG-5: a correction row without a reason silently defeats the
+        # append-only workflow's audit intent for any write path that
+        # bypasses TransactionService.correct_transaction (a future bulk-fix
+        # endpoint, a direct DB statement). Identical on SQLite/PostgreSQL,
+        # no dialect branching needed.
+        CheckConstraint(
+            "original_transaction_id IS NULL OR "
+            "(correction_reason IS NOT NULL AND correction_reason <> '')",
+            name="ck_transactions_correction_reason_required",
+        ),
+    )
 
     transaction_id: Mapped[uuid.UUID] = mapped_column(
         default=uuid.uuid4, primary_key=True, index=True
@@ -32,7 +66,12 @@ class Transaction(CatalogBase):
     wallet_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     total_value: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     balance_status: Mapped[BalanceStatus] = mapped_column(
-        SAEnum(BalanceStatus), nullable=False, default=BalanceStatus.pending
+        # create_constraint=True (PG-2): SQLite only gets a real CHECK
+        # constraint when this is explicit -- without it SQLite silently
+        # accepts any string, while PostgreSQL enforces via a native
+        # CREATE TYPE ... AS ENUM regardless. This closes that coverage gap
+        # so an invalid value is rejected on both dialects identically.
+        SAEnum(BalanceStatus, create_constraint=True), nullable=False, default=BalanceStatus.pending
     )
     expected_total: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(
@@ -64,10 +103,28 @@ class Transaction(CatalogBase):
     # (in addition to the audit log entry) so the detail page can show it
     # without a join.
     original_transaction_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("transactions.transaction_id"), nullable=True, index=True
+        # RESTRICT (PG-9): this is an append-only, audit-oriented schema
+        # where rows are never expected to be hard-deleted in normal
+        # operation -- a raw DELETE of a corrected-from row should fail
+        # loudly rather than silently orphan/cascade the correction chain.
+        # No index=True here: the unique partial index in __table_args__
+        # above (which supersedes the old plain, non-unique index this
+        # column used to carry) already covers every non-null lookup.
+        ForeignKey("transactions.transaction_id", ondelete="RESTRICT"), nullable=True
     )
     is_superseded: Mapped[bool] = mapped_column(nullable=False, default=False)
     correction_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Optimistic locking (consolidated plan §8 / Agent 1 §8): a version
+    # column, not SELECT ... FOR UPDATE -- SQLite has no real row-level
+    # locking, so a FOR UPDATE clause would be silently inert here and give
+    # false confidence that wouldn't carry to PostgreSQL. A version column
+    # is pure application/schema logic that behaves identically on both.
+    # SQLAlchemy bumps this automatically on every UPDATE and raises
+    # StaleDataError if the row was already changed since it was read.
+    version_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    __mapper_args__ = {"version_id_col": version_id}
 
     customer: Mapped["Customer"] = relationship("Customer", back_populates="transactions")
     location: Mapped["Location"] = relationship("Location", back_populates="transactions")
@@ -81,7 +138,12 @@ class Denomination(CatalogBase):
 
     id: Mapped[uuid.UUID] = mapped_column(default=uuid.uuid4, primary_key=True)
     transaction_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("transactions.transaction_id"), nullable=False, index=True
+        # RESTRICT (PG-9): the ORM's cascade="all, delete-orphan" on
+        # Transaction.denominations only fires through the SQLAlchemy
+        # session -- a raw DELETE FROM transactions has no DB-level
+        # protection today. RESTRICT makes that fail loudly instead of
+        # leaving orphaned Denomination rows.
+        ForeignKey("transactions.transaction_id", ondelete="RESTRICT"), nullable=False, index=True
     )
     denomination: Mapped[str] = mapped_column(String(20), nullable=False)
     count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
