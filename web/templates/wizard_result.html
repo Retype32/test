@@ -27,13 +27,13 @@
     </a>
     <div class="btn-group" style="width:100%;">
         <button type="button" class="btn" id="close-btn" style="flex:1;">Complete Transaction</button>
-        <form method="post" action="/web/transactions/new/wizard/complete-cancel-all" style="flex:1;">
-            <button type="submit" class="btn btn-ghost" id="cancel-all-btn" style="width:100%;">Cancel</button>
-        </form>
+        {% include "partials/_complete_cancel_button.html" %}
     </div>
     <p class="text-faint" style="font-size:var(--t-xs); margin: var(--s-2) 0 0;">
-        Cancel permanently deletes every wallet already saved for this bag &mdash; it cannot be undone.
+        Complete Transaction just closes this window &mdash; every wallet saved so far stays as a real transaction.
     </p>
+    {% include "partials/_complete_cancel_form.html" %}
+    {% include "partials/_complete_cancel_note.html" %}
 </div>
 {% else %}
 <div class="btn-group" style="margin-top:var(--s-6); flex-direction:column;">
@@ -54,17 +54,5 @@
 document.getElementById("close-btn").addEventListener("click", () => {
     window.close();
 });
-
-const cancelAllBtn = document.getElementById("cancel-all-btn");
-if (cancelAllBtn) {
-    cancelAllBtn.closest("form").addEventListener("submit", (event) => {
-        if (!confirm(
-            "This permanently deletes every wallet already saved for this bag. " +
-            "This cannot be undone. Continue?"
-        )) {
-            event.preventDefault();
-        }
-    });
-}
 </script>
 {% endblock %}

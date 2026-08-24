@@ -1,0 +1,19 @@
+{#
+  The actual submit target for _complete_cancel_button.html's "Cancel
+  Everything" button, via its form="complete-cancel-all-form" attribute.
+  MUST be included somewhere that is NOT nested inside another <form> on
+  the page (e.g. right after the page's own <form> closes) -- see the
+  comment in _complete_cancel_button.html for why.
+
+  Renders nothing when nothing has been saved yet (saved_count == 0):
+  the button partial renders the ordinary soft-cancel <a> in that case,
+  which needs no target form at all.
+
+  Requires `draft` in scope.
+#}
+{% set saved_count = draft.txn_ids | default([]) | length %}
+{% if saved_count > 0 %}
+<form id="complete-cancel-all-form" method="post" action="/web/transactions/new/wizard/complete-cancel-all"
+      onsubmit="return confirm('This permanently deletes all {{ saved_count }} wallet(s) already saved for this bag. This cannot be undone. Continue?');">
+</form>
+{% endif %}

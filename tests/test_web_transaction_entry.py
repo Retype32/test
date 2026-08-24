@@ -444,6 +444,66 @@ async def test_complete_cancel_permanently_deletes_every_wallet_saved_for_the_ba
     assert bag_number not in landing.text
 
 
+def _assert_cancel_all_form_is_not_nested(html: str) -> None:
+    # Regression: _complete_cancel_button.html's "Cancel Everything" button
+    # targets its submit form via form="complete-cancel-all-form" rather
+    # than wrapping it directly, specifically because these mid-loop pages
+    # (wallet/next, cash) already have their own page-spanning <form> --
+    # HTML doesn't allow a <form> nested inside another one, so a browser
+    # silently drops a nested one (and the onsubmit confirm() guard right
+    # along with it), leaving the button to fall through and submit the
+    # WRONG form instead. This only catches a raw-string regression of that
+    # (whether the target form re-appears nested), not real browser parsing.
+    assert 'id="complete-cancel-all-form"' in html
+    outer_start = html.index("<form")
+    outer_end = html.index("</form>", outer_start) + len("</form>")
+    # The button referencing the target form via form="..." legitimately
+    # sits inside the outer form -- only the target <form ...> ELEMENT
+    # itself must not.
+    assert '<form id="complete-cancel-all-form"' not in html[outer_start:outer_end]
+
+
+async def test_complete_mid_loop_cancel_button_is_not_nested_in_the_wallet_or_cash_form(
+    web_client, api_client, tokens
+):
+    # The very bug this guards against: on a real browser, an early version
+    # of this had the "Cancel Everything" form silently swallowed because it
+    # was nested inside #next-wallet-form / #cash-form, so clicking it just
+    # submitted the wrong (outer) form with no confirm() dialog at all.
+    await _login_and_select_complete(web_client, "cashier1", "cash1")
+
+    await web_client.get("/web/transactions/new/wizard/complete-bag")
+    bag_number = _random_bag_number()
+    await web_client.post("/web/transactions/new/wizard/complete-bag", data={"bag_number": bag_number})
+    await web_client.post(
+        "/web/transactions/new/wizard/wallet/next",
+        data={"wallet_id": f"WALLET-{uuid.uuid4().hex[:8]}", "amount": "5.00", "first": "1"},
+    )
+    await web_client.post(
+        "/web/transactions/new/wizard/cash",
+        data={
+            "count_500": "0", "count_200": "0", "count_100": "0", "count_50": "0",
+            "count_20": "0", "count_10": "0", "count_5": "1", "count_coins": "0",
+        },
+    )
+    await web_client.post("/web/transactions/new/wizard/complete")
+
+    # Now with one wallet already saved, hit the mid-loop screens again --
+    # both need the smart "Cancel Everything" button, and neither may nest
+    # its target form inside the page's own form.
+    wallet_form = await web_client.get("/web/transactions/new/wizard/wallet/next")
+    assert 'form="complete-cancel-all-form"' in wallet_form.text
+    _assert_cancel_all_form_is_not_nested(wallet_form.text)
+
+    await web_client.post(
+        "/web/transactions/new/wizard/wallet/next",
+        data={"wallet_id": f"WALLET-{uuid.uuid4().hex[:8]}", "amount": "5.00"},
+    )
+    cash_page = await web_client.get("/web/transactions/new/wizard/cash")
+    assert 'form="complete-cancel-all-form"' in cash_page.text
+    _assert_cancel_all_form_is_not_nested(cash_page.text)
+
+
 async def test_transaction_creation_blocked_when_day_closed(web_client, api_client, tokens):
     today = date.today().isoformat()
     close = await api_client.post(

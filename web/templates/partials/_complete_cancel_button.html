@@ -1,0 +1,23 @@
+{#
+  Cancel BUTTON for Brink's Complete's bulk-bag flow. Only ever included
+  when draft.flow == "complete" -- every other catalog keeps its own plain
+  "Cancel" link exactly where it already is, untouched.
+
+  This is deliberately just the <button>, not a <form> wrapping it: the
+  including templates place this inside their own page-spanning <form>
+  (e.g. #next-wallet-form, #cash-form), and HTML doesn't allow a <form>
+  nested inside another one -- a browser silently drops the inner one,
+  which drops its onsubmit confirm() guard right along with it and lets
+  the button fall through to submit the WRONG form instead. The button's
+  `form="complete-cancel-all-form"` attribute points it at the actual
+  target form instead, which _complete_cancel_form.html renders separately,
+  outside any other <form> on the page.
+
+  Requires `draft` in scope.
+#}
+{% set saved_count = draft.txn_ids | default([]) | length %}
+{% if saved_count > 0 %}
+<button type="submit" form="complete-cancel-all-form" class="btn btn-ghost" style="flex:1;">Cancel Everything</button>
+{% else %}
+<a href="/web/transactions/new/wizard/cancel" class="btn btn-ghost" style="flex:1;">Cancel</a>
+{% endif %}

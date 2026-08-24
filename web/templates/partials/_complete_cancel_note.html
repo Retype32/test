@@ -1,0 +1,13 @@
+{#
+  Explanatory line to render right under _complete_cancel_button.html, so
+  the cashier knows what Cancel will do *before* clicking it, not just from
+  the confirm() dialog that fires afterward. Requires `draft` in scope.
+#}
+{% set saved_count = draft.txn_ids | default([]) | length %}
+<p class="text-faint" style="font-size:var(--t-xs); margin: var(--s-2) 0 0;">
+{% if saved_count > 0 %}
+Cancel permanently deletes all {{ saved_count }} wallet(s) already saved for this bag &mdash; it cannot be undone.
+{% else %}
+Nothing has been saved yet for this bag &mdash; Cancel just discards what you've entered on this screen.
+{% endif %}
+</p>

@@ -47,6 +47,13 @@
     <form method="post" action="/web/transactions/new/wizard/complete" style="flex:1;">
         <button type="submit" class="btn btn-primary btn-lg" style="width:100%;">Accept Transaction &#10003;</button>
     </form>
+    {% if draft.flow == "complete" %}
+    {% include "partials/_complete_cancel_button.html" %}
+    {% endif %}
 </div>
+{% if draft.flow == "complete" %}
+{% include "partials/_complete_cancel_form.html" %}
+{% include "partials/_complete_cancel_note.html" %}
+{% endif %}
 
 {% endblock %}

@@ -77,12 +77,20 @@
     </div>
 
     <div class="btn-group" style="margin-top:var(--s-5);">
+        {% if draft.flow == "complete" %}
+        {% include "partials/_complete_cancel_button.html" %}
+        {% else %}
         <a href="/web/transactions/new/wizard/cancel" class="btn btn-ghost">Cancel</a>
+        {% endif %}
         <button type="submit" class="btn btn-primary btn-lg" style="flex:1;">
             Review Transaction <span aria-hidden="true">&#9656;</span>
         </button>
     </div>
 </form>
+{% if draft.flow == "complete" %}
+{% include "partials/_complete_cancel_form.html" %}
+{% include "partials/_complete_cancel_note.html" %}
+{% endif %}
 
 {% endblock %}
 

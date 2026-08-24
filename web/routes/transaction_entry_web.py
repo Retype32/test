@@ -445,7 +445,7 @@ async def wizard_complete(
     })
 
     return templates.TemplateResponse(request, "wizard_result.html", {
-        "user": current_user, "step": 4, "txn": txn,
+        "user": current_user, "step": 4, "txn": txn, "draft": {"txn_ids": txn_ids},
         "expected_total": expected, "diff": diff, "diff_status": diff_status,
         "is_complete_flow": draft.get("flow") == "complete",
     })
