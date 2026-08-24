@@ -1,7 +1,10 @@
+import logging
 import threading
 
 from .base import CashCounter, CountResult
 from .config import COUNTER_MODE
+
+logger = logging.getLogger(__name__)
 
 
 def get_counter() -> CashCounter:
@@ -37,15 +40,15 @@ def open_shared_counter() -> None:
     """Connect the process-wide counter. Call once from app startup."""
     global _shared
     if COUNTER_MODE == "none":
-        print("[hardware] COUNTER_MODE=none — no cash counter will be connected.")
+        logger.info("COUNTER_MODE=none — no cash counter will be connected.")
         return
     counter = get_counter()
     try:
         counter.connect()
-    except Exception as exc:
-        print(f"[hardware] Could not connect to the cash counter at startup: {exc}")
-        print("[hardware] Continuing without it. Fix the port and restart Nexus "
-              "to reconnect; counts can still be entered manually.")
+    except Exception:
+        logger.exception("Could not connect to the cash counter at startup.")
+        logger.warning("Continuing without it. Fix the port and restart Nexus "
+                        "to reconnect; counts can still be entered manually.")
         return
     _shared = counter
 

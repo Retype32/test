@@ -1,8 +1,10 @@
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.exception_handlers import http_exception_handler
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -12,6 +14,7 @@ from apscheduler.triggers.cron import CronTrigger
 from hardware import open_shared_counter, close_shared_counter
 from .core.config import settings
 from .core.database import init_databases, CoreSessionLocal, core_engine, _catalog_engines
+from .core.logging_config import configure_logging
 from .services.eod_scheduler import auto_close_all_catalogs
 from .api.routes import auth, customers, transactions, catalogs, eod, notifications, duplicates, stats
 from web.routes import (
@@ -20,6 +23,9 @@ from web.routes import (
     transaction_entry_web,
 )
 from web.templating import templates
+
+configure_logging()
+logger = logging.getLogger(__name__)
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -123,6 +129,17 @@ async def web_aware_http_exception_handler(request: Request, exc: StarletteHTTPE
             return templates.TemplateResponse(request, "errors/404.html", {}, status_code=404)
 
     return await http_exception_handler(request, exc)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Catches anything a route didn't handle itself. Without this, an
+    unexpected bug surfaces as a bare, unlogged 500 -- the cashier sees a
+    dead page and there's no record afterward of what broke or when."""
+    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    if request.url.path.startswith("/web"):
+        return templates.TemplateResponse(request, "errors/500.html", {}, status_code=500)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 @app.get("/health")

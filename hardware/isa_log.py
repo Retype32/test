@@ -26,6 +26,7 @@ Setup (.env):
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from pathlib import Path
@@ -34,6 +35,8 @@ from .base import CashCounter, CountResult
 from .config import COUNTER_PROFILE, ISA_LOG_DIR, ISA_LOG_POLL_SECONDS
 from .report_parser import ReportParseError, parse_report
 from .report_profile import DeviceProfile, load_profile
+
+logger = logging.getLogger(__name__)
 
 # "Product Code = 10401 , Quantity = 12" — spacing deliberately loose.
 _PRODUCT_RE = re.compile(
@@ -88,7 +91,7 @@ class ISALogCounter(CashCounter):
             )
         # Start at the end: only batches counted from now on are reported.
         self._pos = self._file.stat().st_size
-        print(f"[ISALog] Tailing {self._file} from byte {self._pos}.")
+        logger.info("Tailing %s from byte %d.", self._file, self._pos)
         return True
 
     def disconnect(self) -> None:
@@ -178,9 +181,11 @@ class ISALogCounter(CashCounter):
     def _finish(self, quantities: dict[str, int], raw_lines: list[str],
                 unknown_codes: dict[str, int]) -> CountResult:
         if unknown_codes:
-            print(f"[ISALog] WARNING: product codes not in profile "
-                  f"{self._profile.name!r}: {unknown_codes} — add them to the "
-                  "profile's denoms (isacode) to include them.")
+            logger.warning(
+                "Product codes not in profile %r: %s — add them to the "
+                "profile's denoms (isacode) to include them.",
+                self._profile.name, unknown_codes,
+            )
 
         # Prefer the plugin's own parsed output; it is what ISA booked.
         if quantities:
@@ -197,6 +202,6 @@ class ISALogCounter(CashCounter):
             ) from exc
         if report.warnings:
             for warning in report.warnings:
-                print(f"[ISALog] WARNING: {warning}")
+                logger.warning(warning)
         return CountResult(denominations=report.denominations,
                            raw_response=text.encode("utf-8", "replace"))
