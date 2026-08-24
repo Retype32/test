@@ -384,6 +384,66 @@ async def test_complete_catalog_uses_the_bulk_bag_flow_with_a_placeholder_custom
     assert data2["wallet_id"] == wallet_2
 
 
+async def test_complete_cancel_permanently_deletes_every_wallet_saved_for_the_bag(web_client, api_client, tokens):
+    # "Cancel" on Complete's result screen is a genuine hard delete (by
+    # explicit design choice for this one flow, unlike the rest of the app's
+    # append-only correction pattern): every transaction saved so far for
+    # this bulk bag disappears, not just the in-progress draft.
+    await _login_and_select_complete(web_client, "cashier1", "cash1")
+
+    await web_client.get("/web/transactions/new/wizard/complete-bag")
+    bag_number = _random_bag_number()
+    await web_client.post("/web/transactions/new/wizard/complete-bag", data={"bag_number": bag_number})
+
+    wallet_1 = f"WALLET-{uuid.uuid4().hex[:8]}"
+    await web_client.post(
+        "/web/transactions/new/wizard/wallet/next",
+        data={"wallet_id": wallet_1, "amount": "20.00", "first": "1"},
+    )
+    await web_client.post(
+        "/web/transactions/new/wizard/cash",
+        data={
+            "count_500": "0", "count_200": "0", "count_100": "0", "count_50": "0",
+            "count_20": "1", "count_10": "0", "count_5": "0", "count_coins": "0",
+        },
+    )
+    first = await web_client.post("/web/transactions/new/wizard/complete")
+    txn_id_1 = re.search(r"TRANSACTION ID.{0,80}?([0-9a-f-]{36})", first.text, re.S).group(1)
+
+    wallet_2 = f"WALLET-{uuid.uuid4().hex[:8]}"
+    await web_client.post(
+        "/web/transactions/new/wizard/wallet/next",
+        data={"wallet_id": wallet_2, "amount": "10.00"},
+    )
+    await web_client.post(
+        "/web/transactions/new/wizard/cash",
+        data={
+            "count_500": "0", "count_200": "0", "count_100": "0", "count_50": "0",
+            "count_20": "0", "count_10": "1", "count_5": "0", "count_coins": "0",
+        },
+    )
+    second = await web_client.post("/web/transactions/new/wizard/complete")
+    txn_id_2 = re.search(r"TRANSACTION ID.{0,80}?([0-9a-f-]{36})", second.text, re.S).group(1)
+
+    admin_headers = {"Authorization": f"Bearer {tokens['admin']}", "X-Catalog": "complete"}
+    still_there = await api_client.get(f"/api/v1/transactions/{txn_id_1}", headers=admin_headers)
+    assert still_there.status_code == 200
+
+    cancelled = await web_client.post("/web/transactions/new/wizard/complete-cancel-all")
+    assert cancelled.status_code == 200
+    assert "2 transaction(s)" in cancelled.text
+    assert "permanently deleted" in cancelled.text
+
+    for txn_id in (txn_id_1, txn_id_2):
+        gone = await api_client.get(f"/api/v1/transactions/{txn_id}", headers=admin_headers)
+        assert gone.status_code == 404
+
+    # The draft is cleared too -- "Add New Bag" starts a genuinely fresh bag.
+    landing = await web_client.get("/web/transactions/new/wizard/complete-bag")
+    assert landing.status_code == 200
+    assert bag_number not in landing.text
+
+
 async def test_transaction_creation_blocked_when_day_closed(web_client, api_client, tokens):
     today = date.today().isoformat()
     close = await api_client.post(

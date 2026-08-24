@@ -1,5 +1,6 @@
 import asyncio
 import re
+import uuid
 from decimal import Decimal, InvalidOperation
 from typing import Annotated
 from fastapi import APIRouter, Request, Depends, Form
@@ -429,6 +430,10 @@ async def wizard_complete(
     # re-scanning the customer or bag number. "flow" carries Brink's
     # Complete's bulk-bag session forward too, since draft["flow"] is what
     # the result screen below reads to decide which set of options to show.
+    # "txn_ids" accumulates every transaction created in this bag session so
+    # far -- it's what "Cancel" on that same screen deletes wholesale if the
+    # cashier calls the whole bag off partway through.
+    txn_ids = draft.get("txn_ids", []) + [str(txn.transaction_id)]
     _save_draft(request, {
         "customer_id": draft["customer_id"],
         "customer_name": draft["customer_name"],
@@ -436,6 +441,7 @@ async def wizard_complete(
         "location_name": draft["location_name"],
         "bag_number": draft["bag_number"],
         "flow": draft.get("flow"),
+        "txn_ids": txn_ids,
     })
 
     return templates.TemplateResponse(request, "wizard_result.html", {
@@ -446,9 +452,50 @@ async def wizard_complete(
 
 
 @router.get("/transactions/new/wizard/cancel")
-async def wizard_cancel(request: Request, current_user: WebCurrentUser):
+async def wizard_cancel(
+    request: Request,
+    current_user: WebCurrentUser,
+    catalog_code: Annotated[CatalogCode, Depends(get_web_catalog_code)],
+):
     _save_draft(request, {})
-    return templates.TemplateResponse(request, "wizard_cancelled.html", {"user": current_user, "step": 0})
+    return templates.TemplateResponse(request, "wizard_cancelled.html", {
+        "user": current_user, "step": 0, "catalog_code": catalog_code.value,
+    })
+
+
+@router.post("/transactions/new/wizard/complete-cancel-all")
+async def wizard_complete_cancel_all(
+    request: Request,
+    current_user: WebCurrentUser,
+    db: WebCatalogDB,
+    catalog_code: Annotated[CatalogCode, Depends(get_web_catalog_code)],
+):
+    """"Cancel" on the Complete result screen -- unlike every other cancel
+    link in this wizard, this one has real, already-saved transactions to
+    undo. By explicit design choice for this one flow, "undo" means a real
+    delete (TransactionService.delete_transactions), not the append-only
+    void/correction pattern the rest of the app uses for financial records.
+    """
+    draft = _draft(request)
+    txn_ids_raw = draft.get("txn_ids", [])
+    deleted_count = 0
+    if txn_ids_raw:
+        service = TransactionService(db)
+        deleted_count = await service.delete_transactions(
+            [uuid.UUID(t) for t in txn_ids_raw],
+            current_user.id,
+            f"Cashier cancelled bulk bag {draft.get('bag_number', '?')} via Brink's Complete",
+        )
+    _save_draft(request, {})
+    message = (
+        f"This bag was cancelled and {deleted_count} transaction(s) already saved for it were "
+        "permanently deleted." if deleted_count else
+        "This transaction was cancelled. Nothing was saved."
+    )
+    return templates.TemplateResponse(request, "wizard_cancelled.html", {
+        "user": current_user, "step": 0, "catalog_code": catalog_code.value,
+        "cancel_message": message,
+    })
 
 
 # --------------------------------------------------------------------------

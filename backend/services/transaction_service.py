@@ -2,14 +2,16 @@ import uuid
 from decimal import Decimal
 from datetime import datetime, date
 from typing import Optional
+from sqlalchemy import delete, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..repositories.transaction_repository import TransactionRepository, AuditRepository
 from ..repositories.customer_repository import CustomerRepository
 from ..services.eod_service import EODService
 from ..services.notification_service import NotificationService
 from ..services.duplicate_detection_service import DuplicateDetectionService
-from ..models.transaction import Transaction, BalanceStatus
-from ..models.notification import NotificationEventType, NotificationSeverity
+from ..models.transaction import Transaction, Denomination, BalanceStatus
+from ..models.notification import Notification, NotificationEventType, NotificationSeverity
+from ..models.duplicate import DuplicateFlag
 from ..schemas.transaction import TransactionCreate
 
 
@@ -255,3 +257,37 @@ class TransactionService:
 
         corrected = await self.repo.get_by_id(corrected.transaction_id)
         return corrected
+
+    async def delete_transactions(
+        self, transaction_ids: list[uuid.UUID], deleted_by_user_id: uuid.UUID, reason: str
+    ) -> int:
+        """Permanently erase a set of transactions and everything that
+        references them: denominations, any duplicate flag naming one of
+        them on either side, and any notification pointing at one.
+
+        Used only by Brink's Complete's bulk-bag "Cancel everything" -- a
+        genuine hard delete rather than the append-only void/correction
+        pattern the rest of this app uses for financial records, by explicit
+        design choice for that one flow. An audit log entry survives the
+        deletion (which transactions, by whom, why) since that's the only
+        trace left once the rows themselves are gone.
+        """
+        if not transaction_ids:
+            return 0
+
+        await self.db.execute(delete(Denomination).where(Denomination.transaction_id.in_(transaction_ids)))
+        await self.db.execute(delete(DuplicateFlag).where(or_(
+            DuplicateFlag.transaction_id.in_(transaction_ids),
+            DuplicateFlag.duplicate_of_transaction_id.in_(transaction_ids),
+        )))
+        await self.db.execute(delete(Notification).where(Notification.related_transaction_id.in_(transaction_ids)))
+        result = await self.db.execute(delete(Transaction).where(Transaction.transaction_id.in_(transaction_ids)))
+        deleted_count = result.rowcount or 0
+
+        await self.audit_repo.log(
+            deleted_by_user_id, "TRANSACTIONS_DELETED",
+            f"Bulk bag cancelled: permanently deleted {deleted_count} transaction(s) "
+            f"({', '.join(str(t) for t in transaction_ids)}). Reason: {reason}",
+        )
+        await self.db.commit()
+        return deleted_count

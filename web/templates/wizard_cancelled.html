@@ -4,10 +4,12 @@
 {% block wizard_subtitle %}Nothing was saved{% endblock %}
 {% block content %}
 
-<p class="text-muted">This transaction was cancelled. You can close this window or start a new one.</p>
+<p class="text-muted">{{ cancel_message or "This transaction was cancelled. You can close this window or start a new one." }}</p>
 
 <div class="btn-group" style="margin-top:var(--s-5);">
-    <a href="/web/transactions/new/wizard/customer" class="btn" style="flex:1;">New Transaction</a>
+    <a href="/web/transactions/new/wizard/{{ 'complete-bag' if catalog_code == 'complete' else 'customer' }}" class="btn" style="flex:1;">
+        {{ "Add New Bag" if catalog_code == "complete" else "New Transaction" }}
+    </a>
     <button type="button" class="btn btn-primary btn-lg" id="close-btn" style="flex:1;">Close Window</button>
 </div>
 
