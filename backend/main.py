@@ -9,9 +9,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from hardware import open_shared_counter, close_shared_counter
 from .core.config import settings
-from .core.database import init_databases, CoreSessionLocal, core_engine, _catalog_engines
+from .core.database import (
+    init_databases, CoreSessionLocal, core_engine, _catalog_engines, checkpoint_all_sqlite_databases,
+)
 from .services.eod_scheduler import auto_close_all_catalogs
 from .api.routes import auth, customers, transactions, catalogs, eod, notifications, duplicates, stats
 from web.routes import (
@@ -45,6 +48,10 @@ async def lifespan(app: FastAPI):
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
         auto_close_all_catalogs, CronTrigger(hour=0, minute=0), id="eod_auto_close", replace_existing=True
+    )
+    scheduler.add_job(
+        checkpoint_all_sqlite_databases, IntervalTrigger(seconds=5),
+        id="sqlite_wal_checkpoint", replace_existing=True,
     )
     scheduler.start()
 

@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, case
+from sqlalchemy import select, and_, case, desc
 from sqlalchemy.orm import selectinload
 from ..models.transaction import Transaction, Denomination, AuditLog, BalanceStatus
 
@@ -85,6 +85,31 @@ class TransactionRepository:
             select(Transaction)
             .options(selectinload(Transaction.denominations))
             .where(Transaction.user_id == user_id, Transaction.business_date == business_date)
+        )
+        if exclude_transaction_id:
+            query = query.where(Transaction.transaction_id != exclude_transaction_id)
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
+    async def list_recent_by_user_and_business_date(
+        self, user_id: uuid.UUID, business_date: date, exclude_transaction_id: Optional[uuid.UUID] = None,
+        limit: int = 50,
+    ) -> list[Transaction]:
+        """Same filter as list_by_user_and_business_date, but newest-first
+        and capped -- for duplicate-detection, which only ever needs to
+        catch a bag re-entered by mistake shortly after the original (in
+        practice always within the cashier's next few transactions, not
+        somewhere in their next few hundred). Unlike the unbounded version,
+        this keeps duplicate-checking a constant-cost operation regardless
+        of how many transactions a cashier has already logged that day --
+        without it, checking transaction N costs O(N), so a full day's
+        volume for one busy cashier turns into O(day_total^2) work overall."""
+        query = (
+            select(Transaction)
+            .options(selectinload(Transaction.denominations))
+            .where(Transaction.user_id == user_id, Transaction.business_date == business_date)
+            .order_by(desc(Transaction.created_at))
+            .limit(limit)
         )
         if exclude_transaction_id:
             query = query.where(Transaction.transaction_id != exclude_transaction_id)
