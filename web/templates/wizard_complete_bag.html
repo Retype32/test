@@ -1,0 +1,34 @@
+{% extends "wizard_base.html" %}
+{% block title %}New Transaction — Bulk Bag{% endblock %}
+{% block wizard_title %}Add New Bag{% endblock %}
+{% block wizard_subtitle %}Brink's Complete · scan the bulk bag{% endblock %}
+{% block content %}
+
+<div class="wizard-summary">
+    <div class="row"><span class="k">CUSTOMER</span><span class="v">Brink's Complete</span></div>
+</div>
+
+<form method="post" action="/web/transactions/new/wizard/complete-bag" id="complete-bag-form">
+    <div class="form-group">
+        <label for="bag_number">Bulk Bag Number</label>
+        <input type="text" id="bag_number" name="bag_number" class="scan-input num"
+               maxlength="20" inputmode="numeric" autocomplete="off" placeholder="310XXXXXXXXX"
+               value="{{ form_values.get('bag_number', '') }}" autofocus required>
+        <span class="hint">12&ndash;16 digits &middot; usually starts with 310</span>
+    </div>
+
+    <div class="btn-group" style="margin-top:var(--s-5);">
+        <a href="/web/transactions/new/wizard/cancel" class="btn btn-ghost">Cancel</a>
+        <button type="submit" class="btn btn-primary btn-lg" style="flex:1;">
+            Continue <span aria-hidden="true">&#9656;</span>
+        </button>
+    </div>
+</form>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById("bag_number").focus();
+</script>
+{% endblock %}

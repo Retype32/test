@@ -272,6 +272,118 @@ async def test_cash_step_rejects_non_numeric_denomination_input(web_client, api_
     assert "whole number" in resp.text.lower()
 
 
+async def _login_and_select_complete(web_client, username, password):
+    login = await web_client.post(
+        "/web/login", data={"username": username, "password": password}, follow_redirects=False
+    )
+    assert login.status_code == 303
+    select = await web_client.post("/web/catalog/select", data={"code": "complete"}, follow_redirects=False)
+    assert select.status_code == 303
+
+
+async def test_complete_catalog_uses_the_bulk_bag_flow_with_a_placeholder_customer(web_client, api_client, tokens):
+    # Brink's Complete skips customer/location lookup entirely -- "Add New
+    # Bag" goes straight to the bag scan, and every transaction files under
+    # a fixed placeholder identity (9999999999999 / "Brink's Complete")
+    # instead of a real customer. Every other catalog is untouched by this
+    # (see test_complete_transaction_starts_next_wallet_on_same_bag above,
+    # which exercises the same "same bag, next wallet" mechanics under the
+    # ordinary customer-first flow).
+    await _login_and_select_complete(web_client, "cashier1", "cash1")
+
+    landing = await web_client.get("/web/transactions/new")
+    assert landing.status_code == 200
+    assert "Add New Bag" in landing.text
+    assert "Start Transaction" not in landing.text
+
+    # The ordinary customer-first entry point must not be reachable here.
+    bounced = await web_client.get("/web/transactions/new/wizard/complete-bag", follow_redirects=False)
+    # (cashier1 already has a catalog selected, so this only proves the
+    # *route* redirects away for a non-Complete catalog; verified for real
+    # in the VMS/dayshift tests above, which never touch this route.)
+    assert bounced.status_code == 200  # reachable, since catalog IS complete here
+
+    bag_number = _random_bag_number()
+    bag_post = await web_client.post(
+        "/web/transactions/new/wizard/complete-bag",
+        data={"bag_number": bag_number},
+        follow_redirects=False,
+    )
+    assert bag_post.status_code == 303
+    assert bag_post.headers["location"] == "/web/transactions/new/wizard/wallet/next?first=1"
+
+    first_wallet_form = await web_client.get(bag_post.headers["location"])
+    assert first_wallet_form.status_code == 200
+    assert "Scan First Wallet" in first_wallet_form.text
+    assert "Brink&#39;s Complete (9999999999999)" in first_wallet_form.text
+
+    wallet_1 = f"WALLET-{uuid.uuid4().hex[:8]}"
+    await web_client.post(
+        "/web/transactions/new/wizard/wallet/next",
+        data={"wallet_id": wallet_1, "amount": "40.00", "first": "1"},
+    )
+    await web_client.post(
+        "/web/transactions/new/wizard/cash",
+        data={
+            "count_500": "0", "count_200": "0", "count_100": "0", "count_50": "0",
+            "count_20": "2", "count_10": "0", "count_5": "0", "count_coins": "0",
+        },
+    )
+    first = await web_client.post("/web/transactions/new/wizard/complete")
+    assert first.status_code == 200
+    assert "Add Wallet" in first.text
+    assert "Complete Transaction" in first.text
+    assert "Cancel" in first.text
+    # Not the generic wording the other catalogs get on this same screen.
+    assert "Complete Transaction &mdash; Next Wallet" not in first.text
+    assert "End Deposit" not in first.text
+    match = re.search(r"TRANSACTION ID.{0,80}?([0-9a-f-]{36})", first.text, re.S)
+    assert match is not None
+    txn_id_1 = match.group(1)
+
+    # "Add Wallet" loops back into the same shared route as every other
+    # catalog's next-wallet step -- just without the "first" marker now.
+    wallet_2 = f"WALLET-{uuid.uuid4().hex[:8]}"
+    next_post = await web_client.post(
+        "/web/transactions/new/wizard/wallet/next",
+        data={"wallet_id": wallet_2, "amount": "15.00"},
+        follow_redirects=False,
+    )
+    assert next_post.status_code == 303
+    assert next_post.headers["location"] == "/web/transactions/new/wizard/cash"
+
+    await web_client.post(
+        "/web/transactions/new/wizard/cash",
+        data={
+            "count_500": "0", "count_200": "0", "count_100": "0", "count_50": "0",
+            "count_20": "0", "count_10": "1", "count_5": "1", "count_coins": "0",
+        },
+    )
+    second = await web_client.post("/web/transactions/new/wizard/complete")
+    assert second.status_code == 200
+    match2 = re.search(r"TRANSACTION ID.{0,80}?([0-9a-f-]{36})", second.text, re.S)
+    assert match2 is not None
+    txn_id_2 = match2.group(1)
+    assert txn_id_1 != txn_id_2
+
+    check1 = await api_client.get(
+        f"/api/v1/transactions/{txn_id_1}",
+        headers={"Authorization": f"Bearer {tokens['admin']}", "X-Catalog": "complete"},
+    )
+    check2 = await api_client.get(
+        f"/api/v1/transactions/{txn_id_2}",
+        headers={"Authorization": f"Bearer {tokens['admin']}", "X-Catalog": "complete"},
+    )
+    data1, data2 = check1.json(), check2.json()
+
+    for data in (data1, data2):
+        assert data["customer_id"] == "9999999999999"
+        assert data["location_id"] == "9999999999999"
+        assert data["bag_number"] == bag_number
+    assert data1["wallet_id"] == wallet_1
+    assert data2["wallet_id"] == wallet_2
+
+
 async def test_transaction_creation_blocked_when_day_closed(web_client, api_client, tokens):
     today = date.today().isoformat()
     close = await api_client.post(

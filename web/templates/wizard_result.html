@@ -20,6 +20,17 @@
     <div class="row"><span class="k">DECLARED AMOUNT</span><span class="v">&euro;{{ "%.2f"|format(expected_total) }}</span></div>
 </div>
 
+{% if is_complete_flow %}
+<div class="btn-group" style="margin-top:var(--s-6); flex-direction:column;">
+    <a href="/web/transactions/new/wizard/wallet/next" class="btn btn-primary btn-lg" style="width:100%;">
+        Add Wallet <span aria-hidden="true">&#9656;</span>
+    </a>
+    <div class="btn-group" style="width:100%;">
+        <button type="button" class="btn" id="close-btn" style="flex:1;">Complete Transaction</button>
+        <a href="/web/transactions/new/wizard/cancel" class="btn btn-ghost" style="flex:1;">Cancel</a>
+    </div>
+</div>
+{% else %}
 <div class="btn-group" style="margin-top:var(--s-6); flex-direction:column;">
     <a href="/web/transactions/new/wizard/wallet/next" class="btn btn-primary btn-lg" style="width:100%;">
         Complete Transaction &mdash; Next Wallet <span aria-hidden="true">&#9656;</span>
@@ -29,6 +40,7 @@
         <button type="button" class="btn btn-ghost" id="close-btn" style="flex:1;">End Deposit</button>
     </div>
 </div>
+{% endif %}
 
 {% endblock %}
 

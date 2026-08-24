@@ -51,8 +51,8 @@
 
             <div class="section-label">Cashier</div>
             <a class="nav-link {% if active_nav == 'new_transaction' %}active{% endif %}" href="/web/transactions/new"
-               id="new-transaction-link">
-                <span class="ico" aria-hidden="true">&#43;</span>New Transaction</a>
+               id="new-transaction-link" data-catalog-code="{{ catalog_code }}">
+                <span class="ico" aria-hidden="true">&#43;</span>{{ "Add New Bag" if catalog_code == "complete" else "New Transaction" }}</a>
 
             {% if user.role.value in ("supervisor", "administrator") %}
             <div class="section-label">Supervisor</div>
@@ -137,8 +137,9 @@
         var w = 480, h = 720;
         var left = Math.max(0, Math.round((screen.width - w) / 2));
         var top = Math.max(0, Math.round((screen.height - h) / 2));
+        var startStep = link.dataset.catalogCode === "complete" ? "complete-bag" : "customer";
         window.open(
-            "/web/transactions/new/wizard/customer",
+            "/web/transactions/new/wizard/" + startStep,
             "nexus_new_transaction",
             "width=" + w + ",height=" + h + ",left=" + left + ",top=" + top +
             ",menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes"

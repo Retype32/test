@@ -183,6 +183,64 @@ async def wizard_customer_submit(
 
 
 # --------------------------------------------------------------------------
+# Brink's Complete -- a separate, shorter entry point: "Add New Bag" skips
+# customer/location lookup entirely (every Complete transaction files under
+# one fixed placeholder identity -- see CustomerService.ensure_placeholder)
+# and goes straight to scanning the bulk bag, then the first wallet. From
+# there it rejoins the shared wallet -> cash -> confirm -> complete routes
+# below unchanged; only the result screen (wizard_complete) branches on
+# draft["flow"] == "complete" to offer "Add Wallet" / "Complete Transaction"
+# / "Cancel" instead of the other catalogs' next-wallet options.
+# --------------------------------------------------------------------------
+
+COMPLETE_PLACEHOLDER_ID = "9999999999999"
+COMPLETE_PLACEHOLDER_NAME = "Brink's Complete"
+
+
+@router.get("/transactions/new/wizard/complete-bag")
+async def wizard_complete_bag_form(
+    request: Request,
+    current_user: WebCurrentUser,
+    db: WebCatalogDB,
+    catalog_code: Annotated[CatalogCode, Depends(get_web_catalog_code)],
+):
+    if catalog_code != CatalogCode.complete:
+        return RedirectResponse("/web/transactions/new/wizard/customer", status_code=303)
+
+    await CustomerService(db).ensure_placeholder(COMPLETE_PLACEHOLDER_ID, COMPLETE_PLACEHOLDER_NAME)
+    _save_draft(request, {
+        "customer_id": COMPLETE_PLACEHOLDER_ID, "customer_name": COMPLETE_PLACEHOLDER_NAME,
+        "location_id": COMPLETE_PLACEHOLDER_ID, "location_name": COMPLETE_PLACEHOLDER_NAME,
+        "flow": "complete",
+    })
+    return templates.TemplateResponse(request, "wizard_complete_bag.html", {
+        "user": current_user, "step": 1, "error_message": None, "form_values": {},
+    })
+
+
+@router.post("/transactions/new/wizard/complete-bag")
+async def wizard_complete_bag_submit(
+    request: Request,
+    current_user: WebCurrentUser,
+    bag_number: str = Form(...),
+):
+    draft = _draft(request)
+    if draft.get("flow") != "complete":
+        return RedirectResponse("/web/transactions/new/wizard/complete-bag", status_code=303)
+
+    normalized_bag, error = _validate_bag_number(bag_number)
+    if error:
+        return templates.TemplateResponse(request, "wizard_complete_bag.html", {
+            "user": current_user, "step": 1, "error_message": error,
+            "form_values": {"bag_number": bag_number},
+        }, status_code=400)
+
+    draft["bag_number"] = normalized_bag
+    _save_draft(request, draft)
+    return RedirectResponse("/web/transactions/new/wizard/wallet/next?first=1", status_code=303)
+
+
+# --------------------------------------------------------------------------
 # Wizard step 2 -- Bag Number & Declared Amount
 # --------------------------------------------------------------------------
 
@@ -368,18 +426,22 @@ async def wizard_complete(
     # Keep the customer/location/bag context around (drop only the
     # per-wallet fields) so "Complete Transaction" on the result screen can
     # start another, fully independent transaction for the same bag without
-    # re-scanning the customer or bag number.
+    # re-scanning the customer or bag number. "flow" carries Brink's
+    # Complete's bulk-bag session forward too, since draft["flow"] is what
+    # the result screen below reads to decide which set of options to show.
     _save_draft(request, {
         "customer_id": draft["customer_id"],
         "customer_name": draft["customer_name"],
         "location_id": draft["location_id"],
         "location_name": draft["location_name"],
         "bag_number": draft["bag_number"],
+        "flow": draft.get("flow"),
     })
 
     return templates.TemplateResponse(request, "wizard_result.html", {
         "user": current_user, "step": 4, "txn": txn,
         "expected_total": expected, "diff": diff, "diff_status": diff_status,
+        "is_complete_flow": draft.get("flow") == "complete",
     })
 
 
@@ -396,14 +458,35 @@ async def wizard_cancel(request: Request, current_user: WebCurrentUser):
 # so a mistake on one wallet never touches the others.
 # --------------------------------------------------------------------------
 
+def _wallet_next_context(first: bool) -> dict:
+    """Step number and (for Complete's first wallet only) a title override.
+
+    `first` is only ever true for Brink's Complete's bulk-bag flow, scanning
+    its very first wallet right after the bag -- every other caller of this
+    shared route (every catalog's ordinary "next wallet" loop) gets the
+    unchanged defaults baked into wizard_wallet_next.html.
+    """
+    if first:
+        return {"step": 2, "wallet_title": "Scan First Wallet",
+                 "wallet_subtitle": "Bulk bag scanned · scan the first wallet"}
+    return {"step": 3, "wallet_title": None, "wallet_subtitle": None}
+
+
 @router.get("/transactions/new/wizard/wallet/next")
-async def wizard_next_wallet_form(request: Request, current_user: WebCurrentUser):
+async def wizard_next_wallet_form(
+    request: Request,
+    current_user: WebCurrentUser,
+    catalog_code: Annotated[CatalogCode, Depends(get_web_catalog_code)],
+    first: bool = False,
+):
     draft = _draft(request)
     if not draft.get("bag_number"):
-        return RedirectResponse("/web/transactions/new/wizard/customer", status_code=303)
+        fallback = ("/web/transactions/new/wizard/complete-bag" if catalog_code == CatalogCode.complete
+                    else "/web/transactions/new/wizard/customer")
+        return RedirectResponse(fallback, status_code=303)
     return templates.TemplateResponse(request, "wizard_wallet_next.html", {
-        "user": current_user, "step": 3, "draft": draft, "error_message": None,
-        "form_values": {},
+        "user": current_user, "draft": draft, "error_message": None,
+        "form_values": {}, "first": first, **_wallet_next_context(first),
     })
 
 
@@ -413,15 +496,18 @@ async def wizard_next_wallet_submit(
     current_user: WebCurrentUser,
     wallet_id: str = Form(...),
     amount: str = Form(""),
+    first: str = Form(""),
 ):
     draft = _draft(request)
+    is_first = bool(first)
     if not draft.get("bag_number"):
         return RedirectResponse("/web/transactions/new/wizard/customer", status_code=303)
 
     async def _error(message: str):
         return templates.TemplateResponse(request, "wizard_wallet_next.html", {
-            "user": current_user, "step": 3, "draft": draft, "error_message": message,
+            "user": current_user, "draft": draft, "error_message": message,
             "form_values": {"wallet_id": wallet_id, "amount": amount},
+            "first": is_first, **_wallet_next_context(is_first),
         }, status_code=400)
 
     validated_wallet, error = _validate_wallet_id(wallet_id)

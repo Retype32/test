@@ -5,6 +5,23 @@
 {% block content %}
 
 <div class="card" style="max-width:560px;">
+    {% if catalog_code == "complete" %}
+    <div class="card-header">Add New Bag</div>
+    <div class="card-body">
+        <p class="text-muted" style="margin-top:0;">
+            Brink's Complete processes a whole bulk bag in one window, one wallet at a time:
+        </p>
+        <ol style="margin:0 0 var(--s-5); padding-left:20px; color:var(--fg-secondary); line-height:1.9;">
+            <li>Scan the bulk bag</li>
+            <li>Scan the first wallet</li>
+            <li>Cash count and confirmation</li>
+            <li>Add another wallet, or complete the transaction</li>
+        </ol>
+        <button type="button" class="btn btn-primary btn-lg" id="start-txn-btn">
+            Add New Bag <span aria-hidden="true">&#9656;</span>
+        </button>
+    </div>
+    {% else %}
     <div class="card-header">Start a Transaction</div>
     <div class="card-body">
         <p class="text-muted" style="margin-top:0;">
@@ -20,6 +37,7 @@
             Start Transaction <span aria-hidden="true">&#9656;</span>
         </button>
     </div>
+    {% endif %}
 </div>
 
 {% endblock %}
@@ -31,7 +49,7 @@ document.getElementById("start-txn-btn").addEventListener("click", () => {
     const left = Math.max(0, Math.round((screen.width - w) / 2));
     const top = Math.max(0, Math.round((screen.height - h) / 2));
     window.open(
-        "/web/transactions/new/wizard/customer",
+        "/web/transactions/new/wizard/{{ 'complete-bag' if catalog_code == 'complete' else 'customer' }}",
         "nexus_new_transaction",
         `width=${w},height=${h},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes`
     );

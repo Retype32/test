@@ -1,7 +1,7 @@
 {% extends "wizard_base.html" %}
 {% block title %}Next Wallet — {{ settings.display_name }}{% endblock %}
-{% block wizard_title %}Next Wallet{% endblock %}
-{% block wizard_subtitle %}Same bag &middot; new wallet{% endblock %}
+{% block wizard_title %}{{ wallet_title or "Next Wallet" }}{% endblock %}
+{% block wizard_subtitle %}{{ wallet_subtitle or "Same bag · new wallet" }}{% endblock %}
 {% block content %}
 
 <div class="wizard-summary">
@@ -11,6 +11,7 @@
 </div>
 
 <form method="post" action="/web/transactions/new/wizard/wallet/next" id="next-wallet-form">
+    <input type="hidden" name="first" value="{{ '1' if first else '' }}">
     <div class="form-group">
         <label for="wallet_id">Wallet ID</label>
         <input type="text" id="wallet_id" name="wallet_id" class="scan-input"
