@@ -23,6 +23,7 @@ nothing to do with which physical socket is used on the machine:
 
 from __future__ import annotations
 
+import logging
 import time
 from decimal import ROUND_HALF_UP
 
@@ -39,6 +40,8 @@ from .config import (
 from .escpos import strip_escpos
 from .report_parser import ReportParseError, detect_profile, parse_report
 from .report_profile import DeviceProfile, load_profile
+
+logger = logging.getLogger(__name__)
 
 # ESC i -- the C1's usual report terminator. Finding it lets a report be
 # accepted immediately instead of always waiting out the idle timeout; the
@@ -123,13 +126,13 @@ class GDC1ReportCounter(CashCounter):
         self._port.rts = False
         self._port.dtr = False
         self._port.reset_input_buffer()
-        print(f"[C1Report] Listening on {port_name} at {baud} baud ({self._profile.name}).")
+        logger.info("Listening on %s at %s baud (%s).", port_name, baud, self._profile.name)
         return True
 
     def disconnect(self) -> None:
         if self._port and self._port.is_open:
             self._port.close()
-            print("[C1Report] Port closed.")
+            logger.info("Port closed.")
         self._port = None
 
     def wait_for_count_result(self, timeout_seconds: int = 120) -> CountResult:
@@ -143,7 +146,7 @@ class GDC1ReportCounter(CashCounter):
 
         if report.warnings:
             for warning in report.warnings:
-                print(f"[C1Report] WARNING: {warning}")
+                logger.warning(warning)
             if COUNTER_STRICT:
                 raise ReportParseError(
                     "Report failed its own consistency checks: "
@@ -151,10 +154,12 @@ class GDC1ReportCounter(CashCounter):
                     + f"\n\nRaw report received:\n{text}"
                 )
         if report.unmatched_lines:
-            print(f"[C1Report] Unrecognised lines ignored: {report.unmatched_lines}")
+            logger.info("Unrecognised lines ignored: %s", report.unmatched_lines)
         if report.report_number:
-            print(f"[C1Report] Report {report.report_number} "
-                  f"(user {report.user_id or '?'}, machine SN {report.machine_serial_number or '?'})")
+            logger.info(
+                "Report %s (user %s, machine SN %s)",
+                report.report_number, report.user_id or "?", report.machine_serial_number or "?",
+            )
 
         denominations = dict(report.denominations)
         if report.coin_amount:
@@ -199,9 +204,9 @@ class GDC1ReportCounter(CashCounter):
                     f"Raw report received:\n{text}"
                 ) from exc
 
-            print(
-                f"[C1Report] Profile {self._profile.name!r} did not match this "
-                f"report; {profile.name!r} did. Set COUNTER_PROFILE accordingly."
+            logger.warning(
+                "Profile %r did not match this report; %r did. Set COUNTER_PROFILE accordingly.",
+                self._profile.name, profile.name,
             )
             return report
 
@@ -240,10 +245,7 @@ class GDC1ReportCounter(CashCounter):
                 # truncated count — report it as silence rather than letting the
                 # parser fail on it, which would hide the real problem.
                 if len(buf) >= profile.min_report_bytes:
-                    print(
-                        f"[C1Report] Timeout with {len(buf)} bytes buffered; "
-                        "parsing what arrived."
-                    )
+                    logger.warning("Timeout with %d bytes buffered; parsing what arrived.", len(buf))
                     return bytes(buf)
                 noise = f" Received {len(buf)} stray byte(s)." if buf else ""
                 raise TimeoutError(

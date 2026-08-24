@@ -120,7 +120,7 @@ def test_rotation_to_a_new_log_file_is_followed(tmp_path):
     assert result.denominations == {"€10": 7}
 
 
-def test_unknown_product_codes_do_not_silently_vanish(tmp_path, capsys):
+def test_unknown_product_codes_do_not_silently_vanish(tmp_path, caplog):
     log = tmp_path / "DEVICE_LOG.LOG"
     log.write_text("", encoding="utf-8")
     counter = make_counter(tmp_path)
@@ -129,9 +129,10 @@ def test_unknown_product_codes_do_not_silently_vanish(tmp_path, capsys):
     append_later(log, "INFO Product Code = 99999 , Quantity = 4\n"
                       "INFO Product Code = 10401 , Quantity = 1\n"
                       "INFO sent to ISA.\n")
-    result = counter.wait_for_count_result(timeout_seconds=5)
+    with caplog.at_level("WARNING", logger="hardware.isa_log"):
+        result = counter.wait_for_count_result(timeout_seconds=5)
     assert result.denominations == {"€50": 1}
-    assert "99999" in capsys.readouterr().out
+    assert "99999" in caplog.text
 
 
 def test_silence_raises_timeout(tmp_path):

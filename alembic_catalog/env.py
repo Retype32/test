@@ -28,7 +28,12 @@ config.set_main_option("sqlalchemy.url", catalog_db_url(CatalogCode(_catalog_arg
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False: the default (True) silences every
+    # logger already created elsewhere in the process (e.g. app/hardware
+    # loggers) that isn't explicitly listed in this ini's [loggers] section --
+    # and init_databases() runs this on every app startup, not just `alembic`
+    # CLI invocations.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = CatalogBase.metadata
 
