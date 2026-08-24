@@ -210,6 +210,24 @@ class GDC1ReportCounter(CashCounter):
             )
             return report
 
+    def _looks_like_a_complete_report(self, buf: bytearray) -> bool:
+        """Guard the end-marker short-circuit against a false match.
+
+        ESC i is an ordinary two-byte sequence, and the C1's report burst
+        includes raster (bitmap) blocks for a logo ahead of the actual text --
+        arbitrary binary data that can coincidentally contain those same two
+        bytes before the real report has finished arriving. Trusting the
+        first occurrence blindly would return a truncated buffer, leaving the
+        rest of the transmission (including the genuine terminator) unread
+        and desyncing every read after it. Requiring the totals line to
+        already be present is a cheap way to tell a real end marker from
+        noise without having to parse the raster block's own length header.
+        """
+        totals_label = self._profile.label("totals")
+        if not totals_label:
+            return True
+        return totals_label in strip_escpos(bytes(buf))
+
     def read_raw_report(self, timeout_seconds: int = 120) -> bytes:
         """Block until a full report burst has been received.
 
@@ -218,6 +236,14 @@ class GDC1ReportCounter(CashCounter):
         """
         if not self._port or not self._port.is_open:
             raise RuntimeError("Not connected. Call connect() first.")
+
+        # Each call is meant to capture exactly one fresh batch. Drop anything
+        # still sitting in the port's receive buffer from before this call --
+        # trailing bytes the previous report's burst left behind (e.g. a cut
+        # command after its own end marker) would otherwise prefix this read
+        # and desync every batch from here on, since nothing below re-aligns
+        # to a report boundary once the byte stream has drifted.
+        self._port.reset_input_buffer()
 
         profile = self._profile
         buf = bytearray()
@@ -231,7 +257,11 @@ class GDC1ReportCounter(CashCounter):
             if chunk:
                 buf.extend(chunk)
                 last_byte_at = now
-                if len(buf) >= profile.min_report_bytes and _END_MARKER in buf:
+                if (
+                    len(buf) >= profile.min_report_bytes
+                    and _END_MARKER in buf
+                    and self._looks_like_a_complete_report(buf)
+                ):
                     return bytes(buf)
             elif (
                 last_byte_at is not None

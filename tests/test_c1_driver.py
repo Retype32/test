@@ -178,6 +178,65 @@ def test_coin_amount_is_merged_into_denominations_as_coins():
     assert result.denominations["Coins"] == 5
 
 
+def test_stray_end_marker_byte_pair_in_leading_noise_does_not_truncate_the_report():
+    """A coincidental ESC 'i' in the logo/raster block ahead of the real text
+    must not be mistaken for the report's real end marker (regression: this
+    used to return a truncated, unparsed buffer as soon as the two bytes
+    turned up anywhere, real report content or not)."""
+    noise = b"\x02" * 20 + b"\x1b\x69" + b"\x02" * 20  # >= min_report_bytes, no report text
+    real = _encoded() + b"\x1b\x69"
+    counter = _counter([noise, real])
+    result = counter.wait_for_count_result(timeout_seconds=5)
+    assert sum(result.denominations.values()) == EXPECTED_QTY
+
+
+def test_trailing_bytes_after_one_report_do_not_leak_into_the_next_read():
+    """Bytes still queued after a report's own end marker (e.g. a trailing
+    cut command) must not prefix the *next* wait_for_count_result() call and
+    corrupt its totals (regression: the port was never cleared between
+    reads, so leftover bytes from report N silently merged into report N+1).
+
+    FakeSerial's reset_input_buffer() is a no-op (other tests rely on that
+    to keep their pre-queued chunks intact), so this test uses a variant
+    that actually discards whatever is queued when it's called -- matching
+    a real port, where reset_input_buffer() drops only what has arrived so
+    far, not bytes the machine hasn't sent yet. Each report is therefore
+    delivered by a background thread *after* a short delay, same as a real
+    port: the read call is already blocked and past its own reset_input_buffer()
+    call by the time the bytes turn up, so that call never has a chance to
+    discard the very data it's waiting for.
+    """
+    import threading
+    import time as _time
+
+    class FlushingFakeSerial(FakeSerial):
+        def reset_input_buffer(self):
+            self._chunks.clear()
+
+    report1 = _encoded() + b"\x1b\x69"
+    trailing_noise = b"EUR 50   1    50.00\r\n"  # left in the port after report1's marker
+    report2 = _encoded() + b"\x1b\x69"
+
+    counter = _counter([], idle=0.01)
+    counter._port = FlushingFakeSerial([])
+
+    def deliver(data, delay):
+        _time.sleep(delay)
+        counter._port._chunks.append(data)
+
+    threading.Thread(target=deliver, args=(report1, 0.02)).start()
+    result1 = counter.wait_for_count_result(timeout_seconds=5)
+    assert sum(result1.denominations.values()) == EXPECTED_QTY
+
+    # Leftover bytes sitting in the port before the next read even starts.
+    counter._port._chunks.append(trailing_noise)
+    threading.Thread(target=deliver, args=(report2, 0.05)).start()
+
+    result2 = counter.wait_for_count_result(timeout_seconds=5)
+    assert sum(result2.denominations.values()) == EXPECTED_QTY
+    assert result2.denominations["€50"] == DEFAULT_BATCH["EUR 50"]
+
+
 def test_denomination_keys_match_the_web_form_fields():
     """The parser's output keys feed the transaction entry page directly."""
     from web.routes.transaction_entry_web import DENOM_FIELDS
