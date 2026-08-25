@@ -1,6 +1,8 @@
 import logging
 import threading
 
+import serial
+
 from .base import CashCounter, CountResult
 from .config import COUNTER_MODE
 
@@ -32,8 +34,26 @@ def get_counter() -> CashCounter:
 # out from under a wizard mid-count. Every read shares this one connection
 # and is therefore serialised, which is fine: there is only one physical
 # machine to read from regardless of how many wizard tabs are open.
+#
+# The startup attempt is not the only chance to get it, though. If the
+# machine was not yet ready when Nexus started (COM port still enumerating,
+# ISA still holding it for a moment), or the connection dies later (cable
+# pulled, USB device re-enumerated), wait_for_shared_count() below reconnects
+# on demand instead of reporting "not connected" for the rest of the
+# process's life just because the very first attempt lost a race.
 _shared: CashCounter | None = None
 _shared_lock = threading.Lock()
+
+
+def _connect_locked() -> CashCounter | None:
+    """Try once to open a fresh counter connection. Caller holds _shared_lock."""
+    counter = get_counter()
+    try:
+        counter.connect()
+    except Exception:
+        logger.exception("Could not connect to the cash counter.")
+        return None
+    return counter
 
 
 def open_shared_counter() -> None:
@@ -42,36 +62,52 @@ def open_shared_counter() -> None:
     if COUNTER_MODE == "none":
         logger.info("COUNTER_MODE=none — no cash counter will be connected.")
         return
-    counter = get_counter()
-    try:
-        counter.connect()
-    except Exception:
-        logger.exception("Could not connect to the cash counter at startup.")
-        logger.warning("Continuing without it. Fix the port and restart Nexus "
-                        "to reconnect; counts can still be entered manually.")
-        return
-    _shared = counter
+    with _shared_lock:
+        _shared = _connect_locked()
+        if _shared is None:
+            logger.warning("Continuing without it. The next count request will "
+                            "retry the connection automatically.")
 
 
 def close_shared_counter() -> None:
     """Release the process-wide counter. Call once from app shutdown."""
     global _shared
-    if _shared is not None:
-        _shared.disconnect()
-        _shared = None
+    with _shared_lock:
+        if _shared is not None:
+            _shared.disconnect()
+            _shared = None
 
 
 def wait_for_shared_count(timeout_seconds: int = 120) -> CountResult:
-    """Block for one count result on the process-wide counter connection."""
-    if _shared is None:
-        if COUNTER_MODE == "none":
-            raise ConnectionError("No cash counter is configured. Enter counts manually.")
-        raise ConnectionError(
-            "No cash counter is connected. Check the machine and its COM port, "
-            "then restart Nexus."
-        )
+    """Block for one count result on the process-wide counter connection.
+
+    Reconnects on demand if the shared connection was never established or
+    has since gone stale, so a machine that is genuinely connected now isn't
+    reported as unreachable just because an earlier attempt was not.
+    """
+    global _shared
+    if COUNTER_MODE == "none":
+        raise ConnectionError("No cash counter is configured. Enter counts manually.")
+
     with _shared_lock:
-        return _shared.wait_for_count_result(timeout_seconds)
+        if _shared is None:
+            _shared = _connect_locked()
+            if _shared is None:
+                raise ConnectionError(
+                    "No cash counter is connected. Check the machine and its COM port, "
+                    "then try again."
+                )
+        counter = _shared
+        try:
+            return counter.wait_for_count_result(timeout_seconds)
+        except serial.SerialException:
+            # The port itself has died (cable pulled, device re-enumerated).
+            # Holding on to it would only fail the same way on every future
+            # request, so drop it and let the next request open a fresh
+            # connection instead of requiring a full app restart.
+            counter.disconnect()
+            _shared = None
+            raise
 
 
 __all__ = [
