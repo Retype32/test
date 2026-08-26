@@ -41,7 +41,7 @@ c1_nexus_data/
 Safe operating note
 -------------------
 Only run when operationally authorised. A Windows serial port normally permits
-one owner, so this tool may be unable to open a port already held by ISA, VMS or
+one owner, so this tool may be unable to open a port already held by Nexus or
 another service. It does not bypass port ownership or stop any service.
 """
 
@@ -835,7 +835,7 @@ def run_monitor(port: str, baud: int, idle_seconds: float) -> int:
     except Exception as exc:
         writer.ai.port_event(port, "PORT_OPEN_FAILED", error=repr(exc), baud=baud)
         print(f"ERROR opening {port}: {exc}")
-        print("The port may not exist or may already be owned by ISA/VMS/another process.")
+        print("The port may not exist or may already be owned by another process (e.g. Nexus).")
         return 1
 
     total_bytes = 0

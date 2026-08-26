@@ -71,9 +71,9 @@ def test_reconnects_on_demand_after_a_failed_startup_attempt(monkeypatch):
 def test_the_drivers_specific_failure_reason_reaches_the_caller_intact(monkeypatch):
     """The wizard's status badge shows this string verbatim -- a generic
     "not connected" would hide whether the real cause is a wrong COM port,
-    ISA already holding it, or the machine genuinely being off. The driver
-    (e.g. GDC1ReportCounter) already works this out; it must not be replaced
-    with a vaguer message on the way up."""
+    something else already holding it, or the machine genuinely being off.
+    The driver (e.g. GDC1ReportCounter) already works this out; it must not
+    be replaced with a vaguer message on the way up."""
     _reset_shared_state(monkeypatch)
     counter = FakeCounter(
         connect_results=[ConnectionError("Serial port COM3 does not exist on this PC.")]

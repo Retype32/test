@@ -103,9 +103,10 @@ def _powershell(script: str) -> list[str]:
 def port_status() -> int:
     """Show which serial ports are free, and what is likely holding the busy ones.
 
-    ISA is a browser-based application, so there is no window to close: the
-    process that owns the machine's port is an ISA service on this PC, and the
-    browser is only its user interface. This locates that service.
+    Nexus expects to be the sole owner of the machine's port, so a busy port
+    almost always means something else on this PC still has it open --
+    another Nexus instance, a diagnostic tool left connected, or unrelated
+    software. This locates the candidate.
     """
     import serial
     from serial.tools import list_ports as lp
@@ -135,7 +136,7 @@ def port_status() -> int:
 
     # Deliberately narrow. Generic words like "Device" match dozens of built-in
     # Windows services and drown the real answer in noise.
-    pattern = "ISA|CPS|DeLaRue|De La Rue|Compass|Giesecke|GDUSB|BPS|Cash|Currency|Banknote"
+    pattern = "DeLaRue|De La Rue|Compass|Giesecke|GDUSB|BPS|Cash|Currency|Banknote"
 
     print("Looking for non-Microsoft services that may own a machine port...\n")
     services = _powershell(
@@ -167,13 +168,10 @@ def port_status() -> int:
         print("  No matching third-party program running on this PC.")
 
     print(
-        "\nISA's browser window is only its user interface. The component that\n"
-        "holds the serial port is an ISA service or background process on the PC\n"
-        "the machine is cabled to, so closing the browser frees nothing.\n"
-        "\n"
-        "Names above are only candidates — confirm with whoever administers ISA\n"
-        "before stopping anything. Stopping the wrong service, or the right one\n"
-        "at the wrong time, can take counting offline for other users."
+        "\nNames above are only candidates, not proof — confirm what a service\n"
+        "actually is before stopping it. Nexus should be the only thing holding\n"
+        "the machine's port; once whatever else has it is closed, restart Nexus\n"
+        "so it can claim the port for itself."
     )
     return 0
 
@@ -237,8 +235,8 @@ def doctor(port: str, baud: int, profile_name: str, listen_seconds: int = 20) ->
         sp = serial.Serial(port=port, baudrate=baud, timeout=0.5)
     except serial.SerialException as exc:
         print(f"[FAIL] {port} could not be opened: {exc}")
-        print("       Another program may own it — ISA holds the printer port "
-              "if it is running on this PC.")
+        print("       Another program may own it. Run --port-status to see "
+              "what's holding it, close that, then try again.")
         return 1
     print(f"[ok]   {port} opened at {baud} baud")
 

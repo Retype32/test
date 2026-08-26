@@ -97,16 +97,20 @@ After logging in, you'll be asked to pick a **Processing Catalog** (VMS / Brink'
 The G+D BPS C1 has no host command API. It drives a serial receipt printer, and
 integration works by connecting the PC to that printer port and parsing the
 batch report the machine prints. Nexus never sends the machine a command — it
-only listens. This is the same approach the ISA device plugin uses.
+only listens.
+
+A serial port has exactly one owner. Nexus is meant to be it: it claims the
+port once at startup and holds it for as long as it runs (see [Reserving the
+port for Nexus](#reserving-the-port-for-nexus) below if something else on the
+PC ever gets in the way).
 
 **1. Configure the machine.** On the C1's operator panel, route report/printer
-output to a serial interface at **115200 8N1, no handshake** (the settings ISA
-uses, taken from its plugin config).
+output to a serial interface at **115200 8N1, no handshake**.
 
-Note that `COUNTER_COM_PORT` and the `port` value in ISA's plugin config are
-both **PC-side** Windows port names. Neither says anything about which physical
-socket on the C1 is in use, or how many serial interfaces the machine has —
-consult the C1's own interface menu or G+D documentation for that.
+Note that `COUNTER_COM_PORT` is a **PC-side** Windows port name. It says
+nothing about which physical socket on the C1 is in use, or how many serial
+interfaces the machine has — consult the C1's own interface menu or G+D
+documentation for that.
 
 **2. Wire it up.** Two options, and USB is the easier one if the machine
 supports it:
@@ -190,8 +194,8 @@ The C1's USB interface is not a virtual COM port. G+D drive it with their MAUSB
 driver, which is a rebadged **libusb-win32**: `mausb.sys` identifies itself as
 "LibUSB-Win32 - Kernel Driver" and creates `\Device\libusb0`, and `mausb.dll`
 exports the standard libusb-0.1 API. `MAUSB.inf` binds it to `USB\VID_10c4&PID_ea63`
-under class `USB`, not class `Ports` — so no COM port appears and neither the
-serial driver here nor ISA's plugin (which is `System.IO.Ports` only) can use it.
+under class `USB`, not class `Ports` — so no COM port appears and no
+`System.IO.Ports`-based driver, including the one here, can use it.
 
 The transport is nevertheless open: libusb-0.1 is a public API, and pyusb can
 drive G+D's own DLL directly. `hardware/usb_probe.py` does exactly that:
@@ -210,8 +214,8 @@ Silicon Labs, a USB-UART bridge maker) makes that plausible but unproven.
 
 Two practical constraints:
 
-- **Compass claims the interface exclusively.** Close it before probing, the
-  same conflict as ISA and the serial port.
+- **Compass claims the interface exclusively.** Close it before probing —
+  the same one-owner conflict as any serial port.
 - **The supplied driver is unsigned.** The `.cat` files in the driver folder are
   168-byte DDK placeholders reading "This file will contain the digital
   signature…", and the driver dates from 2010. 64-bit Windows 10/11 will not
@@ -236,67 +240,31 @@ the other. Nexus then behaves exactly as it will with a real C1:
 python -m hardware.simulate --port COM5 --repeat 3
 ```
 
-### Running on a PC that already has ISA
+### Reserving the port for Nexus
 
-**Nexus will not open the port while ISA is running.** A serial port has exactly
-one owner, and ISA's BPS C1 plugin opens the machine's printer port when the
-plugin loads and holds it until the plugin unloads. Nexus will fail at
-`connect()` with "already in use".
+A serial port has exactly one owner. Nexus claims the machine's port once at
+startup and holds it for as long as it runs (`hardware/__init__.py`'s shared
+counter) — nothing else on the PC needs it, and nothing else should have it.
+If `connect()` fails with "already in use", something else on this PC opened
+the port first — most often a diagnostic tool (`C1 Check.py`,
+`hardware.capture`) left running from an earlier session, or a second Nexus
+process that never shut down cleanly.
 
-ISA is browser-based, so there is no window to close. The browser is only its
-user interface; the component holding the port is an ISA service or background
-process on the PC the machine is cabled to. To see what is running:
+To see what's holding it:
 
 ```bash
 python -m hardware.capture --port-status
 ```
 
-This reports which ports are free or in use and lists non-Microsoft services
-and programs whose names suggest they belong to ISA or Compass. Treat the
-results as candidates to discuss with whoever administers ISA — **stopping an
-ISA service can take counting offline for other users**, which is why the
-options below that leave ISA untouched are usually preferable.
+This reports which ports are free or busy and lists non-Microsoft services and
+programs whose names suggest cash-handling software. Close whatever it finds,
+then restart Nexus so it can claim the port for itself. `tools/free_port.py`
+can identify and stop the exact holding process (Administrator required) if
+`--port-status` only narrows it down to candidates.
 
-The upside is that such a PC is already fully configured: the C1 is provably
-printing its report to serial, at known line settings, or ISA could not read it
-either. And the port conflict does not have to be resolved at all:
-
-**Preferred: `COUNTER_MODE=isa_log` — read ISA's own log instead of the port.**
-ISA's device plugin logs everything it reads from the machine (its Common
-library writes `DEVICE_LOG.LOG` in a configured log directory). At the `Info`
-logging level — the shipped default in the plugin config — every batch produces
-`Product Code = <isacode> , Quantity = <n> ... sent to ISA.` entries, and those
-ISA codes map directly onto the denominations in our device profiles. A log
-file can be read by any number of programs while ISA writes it, so Nexus tails
-it and books the same counts ISA books: no port conflict, no cabling, nothing
-about ISA touched or stopped.
-
-```env
-COUNTER_MODE=isa_log
-ISA_LOG_DIR=C:\path\to\isa\device\logs
-```
-
-Find the directory by locating `DEVICE_LOG.LOG` on the ISA PC (ask the ISA
-administrator, or search the ISA installation folder). The driver only reads
-batches counted after Nexus connects — old log content is never re-booked.
-Two dependencies to be aware of: counts flow only while ISA is running, and
-only while its plugin `logging level` stays at `Info` or lower.
-
-If ISA is not running, or Nexus is on its own machine, the direct options:
-
-| Option | Both keep working? | Effort |
-|---|---|---|
-| `isa_log` (above) | Yes | find the log folder |
-| Close ISA while using Nexus | No — one at a time | admin sign-off |
-| Second report output on another C1 interface, if the firmware allows one | Yes | machine config |
-| Passive Y-cable tap on the C1's transmit line | Yes | a cable |
-| Nexus on a separate PC, own cable | Yes | a PC and a cable |
-
-The passive tap works only because this driver is listen-only — it never
-transmits a byte, so it cannot corrupt ISA's data or disturb the machine. That
-is enforced by a test (`test_driver_never_writes_to_the_port`). Get sign-off
-from whoever owns the ISA installation before closing it or touching production
-cabling.
+The driver is listen-only regardless — it never transmits a byte to the
+machine — enforced by a test (`test_driver_never_writes_to_the_port`), so
+reserving the port for Nexus never risks disturbing the machine itself.
 
 ---
 

@@ -57,7 +57,7 @@ def _open_failure_message(port_name: str, exc: Exception) -> str:
     """Explain a failed port open in terms of what actually goes wrong on site.
 
     Windows reports a port that another program already owns as a bare
-    "Access is denied", which gives no hint that ISA is usually the owner.
+    "Access is denied", which gives no hint who the owner actually is.
     """
     detail = str(exc)
     lowered = detail.lower()
@@ -65,13 +65,11 @@ def _open_failure_message(port_name: str, exc: Exception) -> str:
     if "access is denied" in lowered or "permission" in lowered:
         return (
             f"Serial port {port_name} is already in use by another program.\n"
-            "A serial port has exactly one owner. If ISA is running on this PC "
-            "it holds the machine's printer port open for as long as its BPS C1 "
-            "plugin is loaded, which locks Nexus out.\n"
-            "Options: close ISA, give the machine a second report output on "
-            "another interface if its firmware supports one, run Nexus on a "
-            "separate PC, or split the line with a passive Y-cable so both "
-            "hosts receive the same printout.\n"
+            "A serial port has exactly one owner, and Nexus needs to be it. "
+            "Close whatever else has it open -- another Nexus instance still "
+            "running, a diagnostic tool such as C1 Check.py or "
+            "hardware.capture left connected, or any other program on this "
+            "PC using this port -- then restart Nexus so it can claim it.\n"
             f"Original error: {detail}"
         )
 

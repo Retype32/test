@@ -14,9 +14,6 @@ def get_counter() -> CashCounter:
     if COUNTER_MODE in {"c1_report", "serial"}:
         from .gd_c1_report import GDC1ReportCounter
         return GDC1ReportCounter()
-    if COUNTER_MODE == "isa_log":
-        from .isa_log import ISALogCounter
-        return ISALogCounter()
     if COUNTER_MODE == "mock":
         from .mock import MockCounter
         return MockCounter()
@@ -24,7 +21,7 @@ def get_counter() -> CashCounter:
         raise ConnectionError("No cash counter configured. Enter counts manually.")
     raise ValueError(
         f"Unknown COUNTER_MODE={COUNTER_MODE!r}. "
-        "Set COUNTER_MODE to 'c1_report', 'isa_log', 'mock', or 'none' in .env."
+        "Set COUNTER_MODE to 'c1_report', 'mock', or 'none' in .env."
     )
 
 
@@ -37,10 +34,10 @@ def get_counter() -> CashCounter:
 #
 # The startup attempt is not the only chance to get it, though. If the
 # machine was not yet ready when Nexus started (COM port still enumerating,
-# ISA still holding it for a moment), or the connection dies later (cable
-# pulled, USB device re-enumerated), wait_for_shared_count() below reconnects
-# on demand instead of reporting "not connected" for the rest of the
-# process's life just because the very first attempt lost a race.
+# or something else briefly had it open), or the connection dies later
+# (cable pulled, USB device re-enumerated), wait_for_shared_count() below
+# reconnects on demand instead of reporting "not connected" for the rest of
+# the process's life just because the very first attempt lost a race.
 _shared: CashCounter | None = None
 _shared_lock = threading.Lock()
 
@@ -49,9 +46,9 @@ def _connect_locked() -> CashCounter:
     """Open a fresh counter connection. Caller holds _shared_lock.
 
     Raises whatever the driver's own connect() raises (e.g. GDC1ReportCounter
-    names the exact port and the likely cause -- wrong COM port, or ISA
-    already holding it). That detail must reach the caller intact: it is the
-    only way to tell "wrong COM port configured" apart from "machine is
+    names the exact port and the likely cause -- wrong COM port, or something
+    else already holding it). That detail must reach the caller intact: it is
+    the only way to tell "wrong COM port configured" apart from "machine is
     genuinely off" instead of both collapsing into one generic message.
     """
     counter = get_counter()

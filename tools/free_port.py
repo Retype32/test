@@ -319,7 +319,7 @@ def _annotate(holders: dict[int, Holder]) -> None:
 
 def guess_candidates() -> list[str]:
     """Name-based guesses, for when handles cannot be inspected."""
-    pattern = "ISA|CPS|DeLaRue|Compass|Giesecke|GDUSB|BPS|Cash|Currency|Banknote"
+    pattern = "DeLaRue|Compass|Giesecke|GDUSB|BPS|Cash|Currency|Banknote"
     out = powershell(
         "Get-CimInstance Win32_Service | Where-Object { "
         f"($_.Name -match '{pattern}' -or $_.DisplayName -match '{pattern}') "

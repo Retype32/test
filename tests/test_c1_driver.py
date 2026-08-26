@@ -78,7 +78,7 @@ def test_report_split_across_several_reads_is_reassembled():
 
 
 def test_driver_never_writes_to_the_port():
-    """Listen-only is what makes sharing the printer line with ISA safe."""
+    """Listen-only is what makes it safe for Nexus to hold this port at all."""
     counter = _counter([_encoded()])
     counter.wait_for_count_result(timeout_seconds=5)
     assert counter._port.written == bytearray()
@@ -127,8 +127,10 @@ def test_non_strict_mode_accepts_a_mismatched_report_with_a_warning(monkeypatch)
     assert result.denominations == {"€50": 10}
 
 
-def test_busy_port_error_names_isa_as_the_likely_owner(monkeypatch):
-    """The common on-site failure: ISA already owns the machine's port."""
+def test_busy_port_error_says_nexus_must_be_the_sole_owner(monkeypatch):
+    """The common on-site failure: something else already owns the machine's
+    port. Nexus is meant to be the only thing holding it, so the message
+    should say that plainly instead of naming any particular other program."""
     import serial
 
     def refuse(*_a, **_kw):
@@ -141,8 +143,8 @@ def test_busy_port_error_names_isa_as_the_likely_owner(monkeypatch):
         GDC1ReportCounter(profile=PROFILE).connect()
 
     message = str(exc.value)
-    assert "ISA" in message
     assert "already in use" in message
+    assert "Nexus needs to be" in message
 
 
 def test_missing_port_error_points_at_list_ports(monkeypatch):
