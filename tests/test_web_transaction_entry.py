@@ -28,6 +28,45 @@ async def _login_and_select_catalog(web_client, username, password):
     assert select.headers["location"] == "/web/transactions/new"
 
 
+async def test_machine_count_endpoint_returns_denominations_on_success(web_client, monkeypatch):
+    """POST /transactions/new/count is the wizard's "Count with machine"
+    hop -- it wraps hardware.wait_for_shared_count() in a thread and hands
+    the result straight to the browser. Nothing else in the suite exercises
+    this route at all, so a break anywhere in that chain (route wiring,
+    the asyncio.to_thread call, the JSON shape) would go unnoticed."""
+    import hardware
+
+    await _login_and_select_catalog(web_client, "cashier1", "cash1")
+
+    monkeypatch.setattr(
+        hardware, "wait_for_shared_count",
+        lambda timeout_seconds=120: hardware.CountResult(denominations={"€50": 4, "Coins": 2}),
+    )
+
+    resp = await web_client.post("/web/transactions/new/count")
+    assert resp.status_code == 200
+    assert resp.json() == {"denominations": {"€50": 4, "Coins": 2}}
+
+
+async def test_machine_count_endpoint_surfaces_the_specific_connection_error(web_client, monkeypatch):
+    """The wizard's status badge shows this JSON's "error" string verbatim
+    (wizard_cash.html's pollLoop). A generic "not connected" here would
+    silently undo the fix that makes GDC1ReportCounter's specific reason
+    (wrong port / already in use) reach the operator's screen."""
+    import hardware
+
+    await _login_and_select_catalog(web_client, "cashier1", "cash1")
+
+    def _raise(timeout_seconds=120):
+        raise ConnectionError("Serial port COM3 does not exist on this PC.")
+
+    monkeypatch.setattr(hardware, "wait_for_shared_count", _raise)
+
+    resp = await web_client.post("/web/transactions/new/count")
+    assert resp.status_code == 200
+    assert resp.json() == {"error": "Serial port COM3 does not exist on this PC."}
+
+
 async def test_cashier_can_create_transaction_via_wizard(web_client, api_client, tokens):
     await _login_and_select_catalog(web_client, "cashier1", "cash1")
 
