@@ -45,14 +45,17 @@ _shared: CashCounter | None = None
 _shared_lock = threading.Lock()
 
 
-def _connect_locked() -> CashCounter | None:
-    """Try once to open a fresh counter connection. Caller holds _shared_lock."""
+def _connect_locked() -> CashCounter:
+    """Open a fresh counter connection. Caller holds _shared_lock.
+
+    Raises whatever the driver's own connect() raises (e.g. GDC1ReportCounter
+    names the exact port and the likely cause -- wrong COM port, or ISA
+    already holding it). That detail must reach the caller intact: it is the
+    only way to tell "wrong COM port configured" apart from "machine is
+    genuinely off" instead of both collapsing into one generic message.
+    """
     counter = get_counter()
-    try:
-        counter.connect()
-    except Exception:
-        logger.exception("Could not connect to the cash counter.")
-        return None
+    counter.connect()
     return counter
 
 
@@ -63,8 +66,10 @@ def open_shared_counter() -> None:
         logger.info("COUNTER_MODE=none — no cash counter will be connected.")
         return
     with _shared_lock:
-        _shared = _connect_locked()
-        if _shared is None:
+        try:
+            _shared = _connect_locked()
+        except Exception:
+            logger.exception("Could not connect to the cash counter.")
             logger.warning("Continuing without it. The next count request will "
                             "retry the connection automatically.")
 
@@ -91,12 +96,11 @@ def wait_for_shared_count(timeout_seconds: int = 120) -> CountResult:
 
     with _shared_lock:
         if _shared is None:
+            # Deliberately not caught here: the driver's own exception (e.g.
+            # GDC1ReportCounter names the exact port and the likely cause) is
+            # far more useful on screen than a generic "not connected" would
+            # be, and it's what the wizard's status badge displays verbatim.
             _shared = _connect_locked()
-            if _shared is None:
-                raise ConnectionError(
-                    "No cash counter is connected. Check the machine and its COM port, "
-                    "then try again."
-                )
         counter = _shared
         try:
             return counter.wait_for_count_result(timeout_seconds)
