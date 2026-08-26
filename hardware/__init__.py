@@ -57,7 +57,8 @@ def _connect_locked() -> CashCounter:
 
 
 def open_shared_counter() -> None:
-    """Connect the process-wide counter. Call once from app startup."""
+    """Connect the process-wide counter and confirm it's alive. Call once
+    from app startup."""
     global _shared
     if COUNTER_MODE == "none":
         logger.info("COUNTER_MODE=none — no cash counter will be connected.")
@@ -69,6 +70,17 @@ def open_shared_counter() -> None:
             logger.exception("Could not connect to the cash counter.")
             logger.warning("Continuing without it. The next count request will "
                             "retry the connection automatically.")
+            return
+        # connect() succeeding only proves the port opened; is_connected()
+        # is a second, independent check (see GDC1ReportCounter.is_connected)
+        # that actually queries the OS about the device, so a startup log
+        # saying "connected" means something more than "the constructor
+        # didn't throw".
+        if _shared.is_connected():
+            logger.info("Cash counter connection confirmed at startup.")
+        else:
+            logger.warning("Cash counter opened but failed its liveness check "
+                            "immediately after connecting.")
 
 
 def close_shared_counter() -> None:
@@ -78,6 +90,48 @@ def close_shared_counter() -> None:
         if _shared is not None:
             _shared.disconnect()
             _shared = None
+
+
+def _ensure_connected_locked() -> CashCounter:
+    """Return a live connection, reconnecting on demand. Caller holds
+    _shared_lock.
+
+    A connection that fails its own is_connected() check is dropped and
+    reopened first -- the whole point of that check is to catch a
+    connection that looks fine (is_open is still True) but whose physical
+    other end is actually gone, which a bare None check would miss.
+
+    Deliberately doesn't catch _connect_locked()'s exception: the driver's
+    own specific reason (e.g. GDC1ReportCounter names the exact port and the
+    likely cause) is far more useful on screen than a generic "not
+    connected" would be, and it's what the wizard's status badge displays
+    verbatim.
+    """
+    global _shared
+    if _shared is not None and not _shared.is_connected():
+        _shared.disconnect()
+        _shared = None
+    if _shared is None:
+        _shared = _connect_locked()
+    return _shared
+
+
+def ping_shared_counter() -> None:
+    """Confirm the machine connection is alive right now, reconnecting on
+    demand if it isn't. Raises if it can't be reached.
+
+    Unlike wait_for_shared_count(), this never blocks waiting for a batch --
+    it only proves Nexus's own hold on the port is still valid, which is
+    the strongest check available against a device with no command API of
+    its own. Meant to be called at points where the wizard wants proof the
+    machine is still there without committing to a possibly-long wait for
+    the next batch: when a transaction's cash step starts listening, and
+    again right after each batch it receives.
+    """
+    if COUNTER_MODE == "none":
+        raise ConnectionError("No cash counter is configured. Enter counts manually.")
+    with _shared_lock:
+        _ensure_connected_locked()
 
 
 def wait_for_shared_count(timeout_seconds: int = 120) -> CountResult:
@@ -92,13 +146,7 @@ def wait_for_shared_count(timeout_seconds: int = 120) -> CountResult:
         raise ConnectionError("No cash counter is configured. Enter counts manually.")
 
     with _shared_lock:
-        if _shared is None:
-            # Deliberately not caught here: the driver's own exception (e.g.
-            # GDC1ReportCounter names the exact port and the likely cause) is
-            # far more useful on screen than a generic "not connected" would
-            # be, and it's what the wizard's status badge displays verbatim.
-            _shared = _connect_locked()
-        counter = _shared
+        counter = _ensure_connected_locked()
         try:
             return counter.wait_for_count_result(timeout_seconds)
         except serial.SerialException:
@@ -113,5 +161,6 @@ def wait_for_shared_count(timeout_seconds: int = 120) -> CountResult:
 
 __all__ = [
     "CashCounter", "CountResult", "get_counter",
-    "open_shared_counter", "close_shared_counter", "wait_for_shared_count",
+    "open_shared_counter", "close_shared_counter",
+    "ping_shared_counter", "wait_for_shared_count",
 ]

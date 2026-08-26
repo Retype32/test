@@ -133,6 +133,25 @@ class GDC1ReportCounter(CashCounter):
             logger.info("Port closed.")
         self._port = None
 
+    def is_connected(self) -> bool:
+        """Confirm the port handle is still genuinely alive.
+
+        `is_open` alone only reflects whether disconnect() has been called
+        -- it stays True long after the physical device disappears (cable
+        pulled, USB re-enumerated). Touching `in_waiting` makes pyserial's
+        backend actually query the OS about the device, which surfaces a
+        vanished port as SerialException without reading or writing a
+        single byte -- keeping this listen-only and non-blocking, same as
+        every other check this driver does.
+        """
+        if self._port is None or not self._port.is_open:
+            return False
+        try:
+            self._port.in_waiting
+        except serial.SerialException:
+            return False
+        return True
+
     def wait_for_count_result(self, timeout_seconds: int = 120) -> CountResult:
         raw = self.read_raw_report(timeout_seconds)
         # Byte-level cleanup first: raster/ESC-P blocks are binary and can

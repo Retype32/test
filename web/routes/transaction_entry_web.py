@@ -438,6 +438,23 @@ async def wizard_next_wallet_submit(
     return RedirectResponse("/web/transactions/new/wizard/cash", status_code=303)
 
 
+def _ping_counter_sync() -> None:
+    from hardware import ping_shared_counter
+    ping_shared_counter()
+
+
+@router.post("/transactions/new/ping")
+async def ping_counter(current_user: WebCurrentUser):
+    """Non-blocking liveness check -- confirms the machine connection is
+    alive without waiting for a batch. Called when a transaction's cash
+    step starts listening, and again after every batch it receives."""
+    try:
+        await asyncio.to_thread(_ping_counter_sync)
+    except Exception as exc:
+        return JSONResponse({"connected": False, "error": str(exc)})
+    return JSONResponse({"connected": True})
+
+
 def _read_counter_sync() -> dict:
     from hardware import wait_for_shared_count
     return wait_for_shared_count().denominations

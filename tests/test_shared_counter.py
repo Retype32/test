@@ -14,23 +14,35 @@ import hardware
 
 
 class FakeCounter:
-    """A CashCounter stand-in whose connect()/read behaviour is scripted."""
+    """A CashCounter stand-in whose connect()/read behaviour is scripted.
+
+    `alive` is what is_connected() reports; connect()/disconnect() keep it
+    in sync automatically, but a test can also flip it directly to simulate
+    a connection that still looks open yet has silently died -- exactly the
+    case a bare "is _shared None" check can't catch but is_connected() can.
+    """
 
     def __init__(self, connect_results, read_results=None):
         self._connect_results = list(connect_results)
         self._read_results = list(read_results or [])
         self.connect_calls = 0
         self.disconnect_calls = 0
+        self.alive = False
 
     def connect(self):
         self.connect_calls += 1
         outcome = self._connect_results.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
+        self.alive = True
         return outcome
 
     def disconnect(self):
         self.disconnect_calls += 1
+        self.alive = False
+
+    def is_connected(self):
+        return self.alive
 
     def wait_for_count_result(self, timeout_seconds=120):
         outcome = self._read_results.pop(0)
@@ -130,3 +142,85 @@ def test_counter_mode_none_never_touches_the_shared_state(monkeypatch):
         assert False, "expected ConnectionError"
     except ConnectionError as exc:
         assert "is configured" in str(exc).lower()
+
+
+def test_ping_reconnects_without_ever_blocking_for_a_batch(monkeypatch):
+    """ping_shared_counter() is meant to run at the start of every
+    transaction and after every batch -- it must prove the connection is
+    alive without ever waiting for the machine to have something to say.
+    FakeCounter would raise IndexError if this touched
+    wait_for_count_result(), since no read_results were scripted."""
+    _reset_shared_state(monkeypatch)
+    counter = FakeCounter(connect_results=[True])
+    monkeypatch.setattr(hardware, "get_counter", lambda: counter)
+
+    hardware.ping_shared_counter()
+    assert hardware._shared is counter
+    assert counter.connect_calls == 1
+
+
+def test_ping_surfaces_the_specific_failure_reason(monkeypatch):
+    _reset_shared_state(monkeypatch)
+    counter = FakeCounter(
+        connect_results=[ConnectionError("Serial port COM3 does not exist on this PC.")]
+    )
+    monkeypatch.setattr(hardware, "get_counter", lambda: counter)
+
+    try:
+        hardware.ping_shared_counter()
+        assert False, "expected ConnectionError"
+    except ConnectionError as exc:
+        assert "COM3 does not exist" in str(exc)
+
+
+def test_ping_with_counter_mode_none_raises_not_configured(monkeypatch):
+    monkeypatch.setattr(hardware, "COUNTER_MODE", "none")
+    monkeypatch.setattr(hardware, "_shared", None)
+
+    try:
+        hardware.ping_shared_counter()
+        assert False, "expected ConnectionError"
+    except ConnectionError as exc:
+        assert "is configured" in str(exc).lower()
+
+
+def test_a_connection_that_fails_its_own_liveness_check_is_dropped_and_reopened(monkeypatch):
+    """is_connected() catches what a bare None check can't: a connection
+    that still looks open (never explicitly disconnected, nothing has
+    raised yet) but whose physical other end is actually gone -- e.g. a USB
+    device that silently stopped responding while idle between
+    transactions. Both ping and a real count request must reconnect instead
+    of trusting a stale handle."""
+    _reset_shared_state(monkeypatch)
+    stale = FakeCounter(connect_results=[True])
+    monkeypatch.setattr(hardware, "get_counter", lambda: stale)
+    hardware.open_shared_counter()
+    assert hardware._shared is stale
+
+    stale.alive = False  # a liveness check failing without ever raising
+
+    fresh = FakeCounter(
+        connect_results=[True],
+        read_results=[hardware.CountResult(denominations={"€10": 5})],
+    )
+    monkeypatch.setattr(hardware, "get_counter", lambda: fresh)
+
+    result = hardware.wait_for_shared_count()
+    assert result.denominations == {"€10": 5}
+    assert hardware._shared is fresh
+    assert stale.disconnect_calls == 1
+
+
+def test_ping_also_drops_a_connection_that_fails_its_liveness_check(monkeypatch):
+    _reset_shared_state(monkeypatch)
+    stale = FakeCounter(connect_results=[True])
+    monkeypatch.setattr(hardware, "get_counter", lambda: stale)
+    hardware.open_shared_counter()
+    stale.alive = False
+
+    fresh = FakeCounter(connect_results=[True])
+    monkeypatch.setattr(hardware, "get_counter", lambda: fresh)
+
+    hardware.ping_shared_counter()
+    assert hardware._shared is fresh
+    assert stale.disconnect_calls == 1

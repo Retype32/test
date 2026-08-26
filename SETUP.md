@@ -266,6 +266,19 @@ The driver is listen-only regardless — it never transmits a byte to the
 machine — enforced by a test (`test_driver_never_writes_to_the_port`), so
 reserving the port for Nexus never risks disturbing the machine itself.
 
+### Connection checks during a transaction
+
+The C1 has no command API and never replies to anything, so Nexus cannot
+send it a real ping. What it checks instead is its own hold on the port —
+`CashCounter.is_connected()` (`hardware/base.py`) — a non-blocking query
+(`in_waiting` on the port) that surfaces a vanished device as a failure
+without reading or writing a byte. `hardware.ping_shared_counter()` wraps
+that with the same reconnect-on-demand logic `wait_for_shared_count()` uses,
+and the wizard calls it (`POST /transactions/new/ping`) at two points: once
+when a transaction's Cash step starts listening, and again after every batch
+it receives — so a dead connection is caught between reads rather than only
+surfacing on the next read's timeout.
+
 ---
 
 ## Project Structure

@@ -67,6 +67,39 @@ async def test_machine_count_endpoint_surfaces_the_specific_connection_error(web
     assert resp.json() == {"error": "Serial port COM3 does not exist on this PC."}
 
 
+async def test_machine_ping_endpoint_confirms_a_live_connection(web_client, monkeypatch):
+    """POST /transactions/new/ping is the non-blocking liveness check the
+    wizard's cash step calls when it starts listening and again after every
+    batch. It must succeed without ever touching wait_for_count_result."""
+    import hardware
+
+    await _login_and_select_catalog(web_client, "cashier1", "cash1")
+
+    monkeypatch.setattr(hardware, "ping_shared_counter", lambda: None)
+
+    resp = await web_client.post("/web/transactions/new/ping")
+    assert resp.status_code == 200
+    assert resp.json() == {"connected": True}
+
+
+async def test_machine_ping_endpoint_surfaces_the_specific_connection_error(web_client, monkeypatch):
+    import hardware
+
+    await _login_and_select_catalog(web_client, "cashier1", "cash1")
+
+    def _raise():
+        raise ConnectionError("Serial port COM3 does not exist on this PC.")
+
+    monkeypatch.setattr(hardware, "ping_shared_counter", _raise)
+
+    resp = await web_client.post("/web/transactions/new/ping")
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "connected": False,
+        "error": "Serial port COM3 does not exist on this PC.",
+    }
+
+
 async def test_cashier_can_create_transaction_via_wizard(web_client, api_client, tokens):
     await _login_and_select_catalog(web_client, "cashier1", "cash1")
 

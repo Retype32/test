@@ -29,6 +29,13 @@ class FakeSerial:
         self.is_open = True
         self.written = bytearray()
         self.timeout = 0.2
+        self._in_waiting_exc = None  # set to an exception to simulate a dead device
+
+    @property
+    def in_waiting(self):
+        if self._in_waiting_exc is not None:
+            raise self._in_waiting_exc
+        return 0
 
     def read(self, _size):
         return self._chunks.pop(0) if self._chunks else b""
@@ -81,6 +88,40 @@ def test_driver_never_writes_to_the_port():
     """Listen-only is what makes it safe for Nexus to hold this port at all."""
     counter = _counter([_encoded()])
     counter.wait_for_count_result(timeout_seconds=5)
+    assert counter._port.written == bytearray()
+
+
+def test_is_connected_true_for_an_open_responsive_port():
+    counter = _counter([])
+    assert counter.is_connected() is True
+
+
+def test_is_connected_false_before_connect_is_ever_called():
+    counter = GDC1ReportCounter(profile=PROFILE)
+    assert counter.is_connected() is False
+
+
+def test_is_connected_false_after_disconnect():
+    counter = _counter([])
+    counter.disconnect()
+    assert counter.is_connected() is False
+
+
+def test_is_connected_false_when_the_device_has_silently_died():
+    """A vanished USB device surfaces as a SerialException the moment
+    anything touches the port at all, even a read-only status query --
+    is_connected() must catch that rather than trusting a leftover
+    is_open=True that a plain None check would miss entirely."""
+    import serial
+
+    counter = _counter([])
+    counter._port._in_waiting_exc = serial.SerialException("device disappeared")
+    assert counter.is_connected() is False
+
+
+def test_is_connected_never_writes_to_the_port():
+    counter = _counter([])
+    counter.is_connected()
     assert counter._port.written == bytearray()
 
 

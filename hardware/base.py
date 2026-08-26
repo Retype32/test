@@ -21,6 +21,17 @@ class CashCounter(ABC):
         """Close the connection cleanly."""
 
     @abstractmethod
+    def is_connected(self) -> bool:
+        """Non-blocking liveness check of the current connection.
+
+        Never waits for the machine to send anything -- some devices (the
+        C1 included) have no command API and only speak when they have a
+        batch to report, so this can only confirm the local connection
+        itself (port/cable/USB path) is still intact, not that the
+        physical machine on the other end is powered on or wired right.
+        """
+
+    @abstractmethod
     def wait_for_count_result(self, timeout_seconds: int = 120) -> CountResult:
         """
         Block until the machine finishes a counting session and returns

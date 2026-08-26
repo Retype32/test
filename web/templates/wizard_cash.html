@@ -340,7 +340,33 @@ function setStatus(kind, text) {
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
+// Non-blocking liveness check — confirms the connection is alive without
+// waiting for a batch. The C1 has no command API of its own, so this can
+// only prove Nexus's own hold on the port is still valid, not that the
+// physical machine is powered on; it's still the earliest possible warning
+// that something has gone wrong with the connection. Returns whether the
+// check passed; on failure it has already updated the status badge.
+async function pingMachine() {
+    try {
+        const resp = await fetch("/web/transactions/new/ping", {method: "POST"});
+        const data = await resp.json();
+        if (!data.connected) {
+            setStatus("bad", "Machine unavailable — enter counts manually. " + (data.error || ""));
+            return false;
+        }
+        return true;
+    } catch (e) {
+        setStatus("bad", "Machine connection lost — retrying…");
+        return false;
+    }
+}
+
 async function pollLoop() {
+    // Confirm the connection once before this transaction starts listening
+    // at all, rather than only finding out it's down on the first count
+    // request.
+    await pingMachine();
+
     while (listening) {
         setStatus("wait", "Listening for the machine…");
         let data;
@@ -358,6 +384,11 @@ async function pollLoop() {
         if (data.denominations && Object.keys(data.denominations).length) {
             const added = addBatch(data.denominations);
             setStatus("ok", added ? `✓ Batch #${batchCounter} added to the pool.` : "Machine sent an empty batch.");
+            // Re-confirm the connection is still good right after handing
+            // over a batch, so a machine that dies immediately afterwards
+            // is caught here instead of only on the next read's timeout.
+            if (!listening) break;
+            await pingMachine();
         } else if (data.error) {
             if (/no report received/i.test(data.error)) {
                 // A plain read timeout with nothing sent — just keep listening.

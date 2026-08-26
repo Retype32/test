@@ -15,12 +15,20 @@ class MockCounter(CashCounter):
     denomination counts. No hardware required.
     """
 
+    def __init__(self) -> None:
+        self._connected = False
+
     def connect(self) -> bool:
+        self._connected = True
         logger.info("Connected (simulated).")
         return True
 
     def disconnect(self) -> None:
+        self._connected = False
         logger.info("Disconnected (simulated).")
+
+    def is_connected(self) -> bool:
+        return self._connected
 
     def wait_for_count_result(self, timeout_seconds: int = 120) -> CountResult:
         logger.info("Counting banknotes… (3 s simulated delay)")
