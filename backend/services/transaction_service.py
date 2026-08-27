@@ -3,7 +3,8 @@ from decimal import Decimal
 from datetime import datetime, date
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from ..repositories.transaction_repository import TransactionRepository, AuditRepository
+from sqlalchemy.exc import IntegrityError
+from ..repositories.transaction_repository import TransactionRepository, AuditRepository, IdempotencyRepository
 from ..repositories.customer_repository import CustomerRepository
 from ..services.eod_service import EODService
 from ..services.notification_service import NotificationService
@@ -34,6 +35,37 @@ class TransactionService:
         self.eod_service = EODService(db)
         self.notification_service = NotificationService(db)
         self.duplicate_service = DuplicateDetectionService(db)
+        self.idempotency_repo = IdempotencyRepository(db)
+
+    @staticmethod
+    def _idempotency_composite_key(scope: str, client_key: Optional[str]) -> Optional[str]:
+        # Scope the key to (catalog, endpoint, key) per
+        # 01_transaction_integrity.md §7: the catalog is already implicit
+        # (idempotency_keys lives per-catalog DB), and folding `scope` into
+        # the stored primary key itself means a nonce minted for one
+        # endpoint (say, wizard_complete) can never collide with the same
+        # raw value reused against a different endpoint (correct_transaction).
+        if not client_key:
+            return None
+        return f"{scope}:{client_key}"
+
+    async def _existing_idempotent_result(self, composite_key: Optional[str]) -> Optional[Transaction]:
+        if not composite_key:
+            return None
+        existing = await self.idempotency_repo.get(composite_key)
+        if existing and existing.transaction_id:
+            return await self.repo.get_by_id(existing.transaction_id)
+        return None
+
+    @staticmethod
+    def _mark_replay(txn: Transaction) -> Transaction:
+        # A duplicate key within scope returns the previously-created
+        # transaction, not a new insert (§7) -- routes use this plain
+        # (unmapped, so harmless on the ORM object) attribute to answer 200
+        # instead of 201 for a replay, without changing this method's
+        # return type for the many callers that only want the Transaction.
+        txn._idempotent_replay = True
+        return txn
 
     def calculate_balance_status(
         self, total_value: Decimal, expected_total: Optional[Decimal]
@@ -46,7 +78,26 @@ class TransactionService:
             return BalanceStatus.pending
         return BalanceStatus.balanced if total_value == expected_total else BalanceStatus.not_balanced
 
-    async def create_transaction(self, user_id: uuid.UUID, username: str, data: TransactionCreate) -> Transaction:
+    async def create_transaction(
+        self,
+        user_id: uuid.UUID,
+        username: str,
+        data: TransactionCreate,
+        idempotency_key: Optional[str] = None,
+        catalog: str = "",
+    ) -> Transaction:
+        # C-1 / consolidated plan §7: a client-supplied Idempotency-Key (REST
+        # header) or wizard nonce (web form) collapses a retried/double-
+        # submitted create into the original result instead of a second,
+        # fully-accepted financial row. None (the default) preserves today's
+        # behavior exactly -- every existing caller that doesn't pass one
+        # keeps working unchanged.
+        scope = "create_transaction"
+        composite_key = self._idempotency_composite_key(scope, idempotency_key)
+        existing = await self._existing_idempotent_result(composite_key)
+        if existing:
+            return self._mark_replay(existing)
+
         today = datetime.now().date()
         if await self.eod_service.is_day_closed(today):
             raise ValueError(f"Business day {today} is closed for this catalog")
@@ -90,6 +141,23 @@ class TransactionService:
         # the plain inserts above) and to check for duplicates.
         txn = await self.repo.get_by_id(txn.transaction_id)
         await self.duplicate_service.check_for_duplicate(txn)
+
+        if composite_key:
+            try:
+                await self.idempotency_repo.create(composite_key, catalog, scope, txn.transaction_id)
+            except IntegrityError:
+                # A genuinely concurrent request with the same key won the
+                # race and already committed its own transaction+key row
+                # (this session's insert only fails once that's true, since
+                # the unique-index conflict isn't visible until the other
+                # side commits) -- discard this attempt entirely and return
+                # the winner's result instead, exactly as a sequential
+                # retry would see it.
+                await self.db.rollback()
+                winner = await self._existing_idempotent_result(composite_key)
+                if winner:
+                    return self._mark_replay(winner)
+                raise
         return txn
 
     async def get_transaction(self, transaction_id: uuid.UUID) -> Optional[Transaction]:
@@ -120,6 +188,20 @@ class TransactionService:
             offset=offset,
         )
 
+    async def _assert_transfer_allowed(self, txn: Transaction, new_business_date: date) -> None:
+        # H-4: BalanceStatus/EOD-closed status never gated mutation before
+        # this fix -- a transaction could be transferred OUT of an already-
+        # closed day (silently changing what was supposed to be a fixed,
+        # closed snapshot) with no reopen required. Both sides are checked
+        # on every call, never just the target.
+        if await self.eod_service.is_day_closed(txn.business_date):
+            raise ValueError(
+                f"Cannot transfer transaction {txn.transaction_id}: its current business day "
+                f"{txn.business_date} is closed — reopen that day first"
+            )
+        if await self.eod_service.is_day_closed(new_business_date):
+            raise ValueError(f"Cannot transfer into {new_business_date}: that business day is closed")
+
     async def transfer_business_date(
         self,
         transaction_id: uuid.UUID,
@@ -131,8 +213,7 @@ class TransactionService:
         if not txn:
             raise ValueError(f"Transaction {transaction_id} not found")
 
-        if await self.eod_service.is_day_closed(new_business_date):
-            raise ValueError(f"Cannot transfer into {new_business_date}: that business day is closed")
+        await self._assert_transfer_allowed(txn, new_business_date)
 
         return await self._transfer_one(txn, new_business_date, reason, admin_user_id)
 
@@ -143,9 +224,6 @@ class TransactionService:
         reason: str,
         admin_user_id: uuid.UUID,
     ) -> dict:
-        if await self.eod_service.is_day_closed(new_business_date):
-            raise ValueError(f"Cannot transfer into {new_business_date}: that business day is closed")
-
         moved: list[Transaction] = []
         missing: list[uuid.UUID] = []
         for transaction_id in transaction_ids:
@@ -153,6 +231,11 @@ class TransactionService:
             if not txn:
                 missing.append(transaction_id)
                 continue
+            # H-4: re-checked per row, not once before the loop starts -- a
+            # day (either side) can close mid-loop, via a concurrent manual
+            # close or the nightly scheduler firing mid-request for a large
+            # batch.
+            await self._assert_transfer_allowed(txn, new_business_date)
             moved.append(await self._transfer_one(txn, new_business_date, reason, admin_user_id))
         return {"moved": moved, "missing": missing}
 
@@ -200,7 +283,18 @@ class TransactionService:
         data: TransactionCreate,
         reason: str,
         supervisor_user_id: uuid.UUID,
+        idempotency_key: Optional[str] = None,
+        catalog: str = "",
     ) -> Transaction:
+        # C-1/M-2: same idempotency contract as create_transaction (§7),
+        # now available on both the correction web form and the REST
+        # endpoint. None (the default) is fully backward compatible.
+        scope = "correct_transaction"
+        composite_key = self._idempotency_composite_key(scope, idempotency_key)
+        existing = await self._existing_idempotent_result(composite_key)
+        if existing:
+            return self._mark_replay(existing)
+
         original = await self.repo.get_by_id(original_transaction_id)
         if not original:
             raise ValueError(f"Transaction {original_transaction_id} not found")
@@ -208,6 +302,10 @@ class TransactionService:
             raise ValueError("This transaction has already been corrected")
         if original.original_transaction_id is not None:
             raise ValueError("Cannot correct a correction — correct the original transaction instead")
+        # S-09: segregation of duties -- a supervisor reviewing/correcting
+        # their own work defeats the point of a second set of eyes.
+        if supervisor_user_id == original.user_id:
+            raise PermissionError("A supervisor cannot correct their own transaction")
 
         customer = await self.customer_repo.get_by_id(data.customer_id)
         if not customer:
@@ -229,21 +327,31 @@ class TransactionService:
         # transaction-creation gate (EODService.is_day_closed): they don't add
         # new activity to that day, they fix the record for a day that may
         # well already be closed — that's the whole point of the workflow.
-        corrected = await self.repo.create(
-            user_id=original.user_id,
-            username=original.username,
-            customer_id=data.customer_id,
-            location_id=data.location_id,
-            bag_number=data.bag_number,
-            wallet_id=data.wallet_id,
-            total_value=data.total_value,
-            expected_total=data.expected_total,
-            balance_status=balance_status,
-            denominations=denom_list,
-            business_date=original.business_date,
-            original_transaction_id=original.transaction_id,
-            correction_reason=reason,
-        )
+        try:
+            corrected = await self.repo.create(
+                user_id=original.user_id,
+                username=original.username,
+                customer_id=data.customer_id,
+                location_id=data.location_id,
+                bag_number=data.bag_number,
+                wallet_id=data.wallet_id,
+                total_value=data.total_value,
+                expected_total=data.expected_total,
+                balance_status=balance_status,
+                denominations=denom_list,
+                business_date=original.business_date,
+                original_transaction_id=original.transaction_id,
+                correction_reason=reason,
+            )
+        except IntegrityError:
+            # H-3: the unique partial index on original_transaction_id
+            # caught a double-correction race the TOCTOU checks above
+            # couldn't -- a concurrent request corrected the same original
+            # first and already committed. Clean conflict, not a raw 500.
+            await self.db.rollback()
+            raise ValueError(
+                f"Transaction {original_transaction_id} was already corrected by another request"
+            ) from None
 
         await self.repo.set_superseded(original.transaction_id)
 
@@ -254,4 +362,14 @@ class TransactionService:
         )
 
         corrected = await self.repo.get_by_id(corrected.transaction_id)
+
+        if composite_key:
+            try:
+                await self.idempotency_repo.create(composite_key, catalog, scope, corrected.transaction_id)
+            except IntegrityError:
+                await self.db.rollback()
+                winner = await self._existing_idempotent_result(composite_key)
+                if winner:
+                    return self._mark_replay(winner)
+                raise
         return corrected

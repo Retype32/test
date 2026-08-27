@@ -240,6 +240,11 @@ async def correct_transaction_form(
         "denominations": _denomination_prefill(txn),
         "show_form": bool(txn) and not txn.is_superseded and not txn.original_transaction_id,
         "error_message": error_message,
+        # C-1: minted fresh on every render of this form (GET here, or the
+        # re-render on a validation error below) -- a genuine page refresh
+        # therefore always gets a new nonce, while a double-click/duplicate
+        # submit of the same rendered page carries the same one through.
+        "idempotency_nonce": uuid.uuid4().hex,
     })
     return templates.TemplateResponse(request, "transaction_correct.html", context)
 
@@ -284,8 +289,16 @@ async def correct_transaction_submit(
             expected_total=expected_total,
             denominations=denominations,
         )
-        corrected = await service.correct_transaction(transaction_id, data, reason, current_user.id)
-    except (ValueError, InvalidOperation) as e:
+        # Optional: absent on a form rendered before this feature existed in
+        # a given browser tab (or any other non-browser POST), in which case
+        # this is simply not idempotency-protected -- same backward-
+        # compatible behavior as create_transaction with no header.
+        idempotency_nonce = (form.get("idempotency_nonce") or "").strip() or None
+        corrected = await service.correct_transaction(
+            transaction_id, data, reason, current_user.id,
+            idempotency_key=idempotency_nonce, catalog=catalog_code.value,
+        )
+    except (ValueError, InvalidOperation, PermissionError) as e:
         error_message = str(e)
 
     if corrected:
@@ -310,5 +323,6 @@ async def correct_transaction_submit(
         "denominations": _denomination_prefill(txn),
         "show_form": bool(txn) and not txn.is_superseded and not txn.original_transaction_id,
         "error_message": error_message,
+        "idempotency_nonce": uuid.uuid4().hex,
     })
     return templates.TemplateResponse(request, "transaction_correct.html", context)

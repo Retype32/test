@@ -11,6 +11,29 @@ def _connect_args(url: str) -> dict:
     return {"check_same_thread": False} if url.startswith("sqlite") else {}
 
 
+def _pool_kwargs(url: str, *, pool_size: int, max_overflow: int) -> dict:
+    """Connection-pool tuning kwargs for create_async_engine, per PG-1's
+    recommended defaults (docs/production_readiness/04_postgresql_and_reconciliation.md
+    Critical finding PG-1, consolidated_plan §11).
+
+    Confirmed empirically (not assumed): SQLite's pooling -- NullPool for a
+    file-based DB, StaticPool for ":memory:", which is all this app ever
+    uses -- raises TypeError at create_async_engine() if pool_size,
+    max_overflow, or pool_timeout are passed at all; those three are
+    QueuePool-specific arguments SQLAlchemy validates against the pool class
+    up front. pool_recycle and pool_pre_ping, by contrast, are accepted by
+    every pool implementation (they're plain Pool-level options) and are
+    harmless no-ops under NullPool/StaticPool, so they're passed
+    unconditionally. Net effect: on SQLite this is a strict extension of
+    today's behavior (two extra no-op kwargs); on PostgreSQL it's the full
+    tuned pool.
+    """
+    kwargs = {"pool_recycle": 1800, "pool_pre_ping": True}
+    if not url.startswith("sqlite"):
+        kwargs.update(pool_size=pool_size, max_overflow=max_overflow, pool_timeout=10)
+    return kwargs
+
+
 class CoreBase(DeclarativeBase):
     pass
 
@@ -23,6 +46,7 @@ core_engine = create_async_engine(
     settings.database_url_core,
     echo=settings.debug,
     connect_args=_connect_args(settings.database_url_core),
+    **_pool_kwargs(settings.database_url_core, pool_size=5, max_overflow=5),
 )
 
 CoreSessionLocal = async_sessionmaker(
@@ -38,7 +62,12 @@ _catalog_sessionmakers: dict[CatalogCode, async_sessionmaker] = {}
 
 for _code in CatalogCode:
     _url = catalog_db_url(_code)
-    _engine = create_async_engine(_url, echo=settings.debug, connect_args=_connect_args(_url))
+    _engine = create_async_engine(
+        _url,
+        echo=settings.debug,
+        connect_args=_connect_args(_url),
+        **_pool_kwargs(_url, pool_size=10, max_overflow=10),
+    )
     _catalog_engines[_code] = _engine
     _catalog_sessionmakers[_code] = async_sessionmaker(
         _engine,

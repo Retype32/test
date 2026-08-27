@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+import uuid
 from decimal import Decimal, InvalidOperation
 from typing import Annotated
 from fastapi import APIRouter, Request, Depends, Form
@@ -315,6 +316,12 @@ async def wizard_cash_submit(
     draft["denominations"] = [{"denomination": d["denomination"], "count": d["count"],
                                 "value": str(d["value"])} for d in denoms]
     draft["total_value"] = str(total)
+    # C-1: minted fresh every time this confirm screen is (re-)rendered from
+    # the cash-count step -- carried through resubmits (a double-click on
+    # "Accept Transaction" posts the same rendered page, same nonce), but a
+    # genuine edit-and-recount loop back through this same POST gets a new
+    # one, same as a page refresh would.
+    draft["idempotency_nonce"] = uuid.uuid4().hex
     _save_draft(request, draft)
 
     expected = Decimal(draft["expected_total"])
@@ -333,6 +340,8 @@ async def wizard_complete(
     request: Request,
     current_user: WebCurrentUser,
     db: WebCatalogDB,
+    catalog_code: Annotated[CatalogCode, Depends(get_web_catalog_code)],
+    idempotency_nonce: str = Form(""),
 ):
     draft = _draft(request)
     if "denominations" not in draft or "total_value" not in draft:
@@ -357,8 +366,18 @@ async def wizard_complete(
     diff = total - expected
     diff_status = "BALANCED" if diff == 0 else ("SHORTAGE" if diff < 0 else "OVERAGE")
 
+    # C-1: the hidden field on wizard_confirm.html, if this browser session
+    # rendered that page after this feature shipped -- absent (older
+    # session state, or a non-browser POST) falls back to today's
+    # unprotected behavior exactly, same as create_transaction with no
+    # header at all.
+    idempotency_key = (idempotency_nonce or draft.get("idempotency_nonce") or "").strip() or None
+
     try:
-        txn = await service.create_transaction(current_user.id, current_user.username, data)
+        txn = await service.create_transaction(
+            current_user.id, current_user.username, data,
+            idempotency_key=idempotency_key, catalog=catalog_code.value,
+        )
     except ValueError as exc:
         return templates.TemplateResponse(request, "wizard_confirm.html", {
             "user": current_user, "step": 4, "draft": draft,
