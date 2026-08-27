@@ -300,16 +300,31 @@ def _connect_locked() -> C1Counter | None:
 
 
 def open_shared_counter() -> None:
-    """Connect the process-wide counter. Call once from app startup."""
+    """Connect the process-wide counter. Call once from app startup.
+
+    Every outcome here is logged at WARNING or above, deliberately. Whether
+    the counter came up is the single most useful line in the startup log
+    for anyone diagnosing "the machine is unavailable", and an INFO that
+    something else's log configuration can quietly drop is worse than
+    useless -- it looks like nothing happened at all.
+    """
     global _shared
     if not COUNTER_COM_PORT:
-        logger.info("COUNTER_COM_PORT is not set — no cash counter will be connected.")
+        logger.warning(
+            "CASH COUNTER DISABLED — COUNTER_COM_PORT is set to none/off in .env. "
+            "The Count Cash screen will ask cashiers to enter counts manually."
+        )
         return
     with _shared_lock:
         _shared = _connect_locked()
         if _shared is None:
-            logger.warning("Continuing without it. The next count request will "
-                            "retry the connection automatically.")
+            logger.warning(
+                "CASH COUNTER NOT CONNECTED on %s — see the error above. Continuing "
+                "without it; the next count request retries automatically.",
+                COUNTER_COM_PORT,
+            )
+        else:
+            logger.warning("CASH COUNTER READY — listening on %s.", COUNTER_COM_PORT)
 
 
 def close_shared_counter() -> None:
@@ -336,7 +351,10 @@ def wait_for_shared_count(timeout_seconds: int = 120) -> CountResult:
     """
     global _shared
     if not COUNTER_COM_PORT:
-        raise ConnectionError("No cash counter is configured. Enter counts manually.")
+        raise ConnectionError(
+            "No cash counter is configured (COUNTER_COM_PORT is set to none/off "
+            "in .env). Enter counts manually."
+        )
 
     with _shared_lock:
         if _shared is None:
