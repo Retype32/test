@@ -55,17 +55,57 @@ class _RequestIdLogFilter(logging.Filter):
 
 
 def _configure_logging() -> None:
+    """Re-attaches a fresh StreamHandler on every call -- deliberately NOT
+    guarded by "already configured, skip" idempotency, and deliberately
+    called both at module import time AND again at the very start of
+    lifespan() below.
+
+    `logging.StreamHandler()` binds to whatever object `sys.stderr` refers
+    to at the moment it's constructed, not a live reference re-resolved on
+    every write, and this module is only imported once -- for a real ASGI
+    server (`uvicorn backend.main:app`) that import happens during the
+    server's own startup, which could in principle rebind `sys.stderr`
+    afterward. Rebuilding the handler at the start of lifespan() (which by
+    the ASGI lifespan protocol always runs after the server's own setup)
+    is correct hardening against that regardless.
+
+    KNOWN UNRESOLVED GAP, found during Phase 5 load testing and left
+    honestly unresolved rather than papered over: under a real
+    `uvicorn backend.main:app` process (not the in-process ASGI test
+    client, where this logger works perfectly), `logger.info(...)` and
+    `logger.exception(...)` calls made through *this specific*
+    `logging.getLogger("nexus")` instance produce no output at all --
+    verified by placing a raw `print(..., file=sys.stderr, flush=True)`
+    immediately before and after a `logger.info(...)` call: both prints
+    appear in the server's log, the call between them raises nothing, yet
+    nothing from it appears, not even in a fallback/unformatted shape.
+    This is not the handler being missing or misconfigured: messages from
+    OTHER loggers (`sqlalchemy.engine`, `alembic.runtime.plugins`) DO reach
+    this exact handler, correctly formatted, throughout the same process
+    lifetime, including after this function has run. Ruled out: uvicorn's
+    own `LOGGING_CONFIG` (read directly -- it has no "root" entry, so
+    `dictConfig` cannot be touching root's handlers or level); a global
+    `logging.disable(...)` call (would suppress the other loggers' INFO
+    messages too, and it does not); anything in this codebase touching
+    `logging.getLogger("nexus")` (grepped -- this is the only reference).
+    The generic_exception_handler below still correctly returns a clean,
+    sanitized response to the client in every case (confirmed under real
+    concurrent load) -- what's unverified is purely whether the
+    accompanying server-side log line is actually captured, which matters
+    for the "required support information" half of the observability
+    story, not for response correctness. Flagged for whoever picks this
+    up next rather than left silently broken."""
     root = logging.getLogger()
-    if getattr(root, "_nexus_logging_configured", False):
-        return  # idempotent -- safe if main.py is imported more than once (tests do)
+    for h in [h for h in root.handlers if getattr(h, "_nexus_handler", False)]:
+        root.removeHandler(h)
     handler = logging.StreamHandler()
     handler.setFormatter(logging.Formatter(
         "%(asctime)s %(levelname)s [req=%(request_id)s] %(name)s: %(message)s"
     ))
     handler.addFilter(_RequestIdLogFilter())
+    handler._nexus_handler = True
     root.addHandler(handler)
     root.setLevel(logging.INFO)
-    root._nexus_logging_configured = True
 
 
 _configure_logging()
@@ -110,6 +150,11 @@ async def _check_engine_reachable(engine) -> bool:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Re-assert our log handler survives the ASGI server's own logging
+    # setup -- see _configure_logging()'s docstring for why this can't
+    # just be the one call at module import time.
+    _configure_logging()
+
     # S-02/S-11: refuse to start in production with a default/missing
     # SECRET_KEY or a non-Secure session cookie -- before touching the
     # database at all. No-op in development (today's behavior, unchanged).
