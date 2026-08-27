@@ -51,7 +51,21 @@ def _random_denoms_and_amount(rng, mismatch_probability: float = 0.1):
     """Picks a small random denomination mix and a declared amount --
     BALANCED most of the time, occasionally a genuine SHORTAGE/OVERAGE
     (real cash-counting outcomes, not harness bugs -- BalanceStatus.
-    not_balanced is a legitimate business outcome per plan section 6)."""
+    not_balanced is a legitimate business outcome per plan section 6).
+
+    Returns (form, true_total, declared_amount): true_total is what the
+    denominations in `form` actually sum to -- always the right value for
+    a caller building `total_value` (the *counted* total; the app's own
+    calculate_balance_status() only ever compares this against
+    expected_total, and Agent 1's finding L-1 already established the
+    server never independently recomputes total_value from the
+    denominations it's handed -- so a caller passing anything other than
+    true_total there isn't testing a real shortage/overage, it's just
+    feeding the server data that doesn't reconcile with its own line
+    items). declared_amount is the (possibly perturbed) expected_total a
+    real cashier would have keyed in at the bag-scan step, before
+    counting -- the two intentionally differ ~mismatch_probability of the
+    time to produce genuine SHORTAGE/OVERAGE outcomes."""
     picks = rng.sample(config.DENOM_FIELD_TO_LABEL, k=rng.randint(1, 3))
     form = {field: "0" for field, _, _ in config.DENOM_FIELD_TO_LABEL}
     total = 0
@@ -62,7 +76,7 @@ def _random_denoms_and_amount(rng, mismatch_probability: float = 0.1):
     amount = total
     if rng.random() < mismatch_probability:
         amount = max(0, total + rng.choice([-1, 1]) * rng.randint(1, 20))
-    return form, str(amount)
+    return form, str(total), str(amount)
 
 
 # ---------------------------------------------------------------------
@@ -149,7 +163,7 @@ async def journey_j1_wizard(
 
     await tc.call("GET", "/web/transactions/new/wizard/cash", success_statuses=(200,))
 
-    denom_form, amount = _random_denoms_and_amount(session.rng)
+    denom_form, _true_total, _amount = _random_denoms_and_amount(session.rng)
     # Re-declare the bag using this iteration's actual denom total so the
     # confirm screen's BALANCED/SHORTAGE math is self-consistent -- resubmit
     # the bag step's amount would require going back a page, so instead we
@@ -236,7 +250,7 @@ async def journey_j1_api_create(
 
     bag_number = random_bag_number(session.rng)
     wallet_id = random_wallet_id()
-    denom_form, amount = _random_denoms_and_amount(session.rng)
+    denom_form, true_total, declared_amount = _random_denoms_and_amount(session.rng)
     denominations = [
         {"denomination": label, "count": int(denom_form[field]), "value": str(value * int(denom_form[field]))}
         for field, label, value in config.DENOM_FIELD_TO_LABEL
@@ -247,8 +261,18 @@ async def journey_j1_api_create(
         "location_id": location_id,
         "bag_number": bag_number,
         "wallet_id": wallet_id,
-        "total_value": amount,
-        "expected_total": amount,
+        # total_value must equal sum(denominations) -- it represents what
+        # was actually counted, not what was declared beforehand. Passing
+        # declared_amount here (a bug fixed during Phase 5 validation) was
+        # generating load-test transactions that violated the app's own
+        # header/denomination reconciliation invariant on ~10% of runs
+        # (matching _random_denoms_and_amount's mismatch_probability
+        # exactly) -- not a concurrency defect, a harness data-generation
+        # bug feeding the server data even a well-behaved client would
+        # never send. expected_total is the one meant to (occasionally)
+        # differ, producing genuine SHORTAGE/OVERAGE outcomes.
+        "total_value": true_total,
+        "expected_total": declared_amount,
         "denominations": denominations,
     }
     # Forward-compatible per the Phase 3 idempotency contract (consolidated
