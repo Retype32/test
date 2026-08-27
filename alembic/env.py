@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.core.database import CoreBase
 from backend.core.config import settings
+from backend.core.logging_config import is_configured
 from backend.models import user, core_audit  # noqa: F401  (populates CoreBase.metadata)
 
 # this is the Alembic Config object, which provides
@@ -22,12 +23,16 @@ config.set_main_option("sqlalchemy.url", settings.database_url_core)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
-if config.config_file_name is not None:
-    # disable_existing_loggers=False: the default (True) silences every
-    # logger already created elsewhere in the process (e.g. app/hardware
-    # loggers) that isn't explicitly listed in this ini's [loggers] section --
-    # and init_databases() runs this on every app startup, not just `alembic`
-    # CLI invocations.
+if config.config_file_name is not None and not is_configured():
+    # Only when run from the `alembic` CLI. init_databases() also runs this
+    # env.py on every app startup, and there the app has already configured
+    # logging -- applying this ini's config on top would replace the root
+    # logger's handlers (losing the rotating nexus.log file handler) and
+    # raise the root level to WARNING, silently discarding every INFO the
+    # app logs from that point on, console and file alike.
+    #
+    # disable_existing_loggers=False additionally keeps loggers already
+    # created elsewhere (app/hardware) alive rather than silencing them.
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = CoreBase.metadata

@@ -13,7 +13,6 @@ import json
 import pytest
 
 from hardware.c1_engine import (
-    DuplicateReportError,
     ReportParseError,
     SeenReports,
     StreamCollector,
@@ -191,10 +190,20 @@ def test_stray_end_marker_in_leading_noise_does_not_truncate_the_report():
     assert collector.add(noise_with_fake_marker + _SIMPLE_REPORT) == [_SIMPLE_REPORT]
 
 
-def test_idle_report_requires_totals_text_present():
+def test_idle_report_emits_an_unterminated_report_for_the_parser_to_judge():
+    """A report that never got its ESC i (or arrived garbled) must still be
+    framed once the line goes quiet, so the parser can reject it out loud
+    instead of it vanishing into a silent timeout."""
     collector = StreamCollector()
-    collector.add(b"NO:1\r\nCurrency: EUR\r\n")  # no "Total" yet
+    collector.add(b"NO:1\r\nCurrency: EUR\r\n")  # no totals line, no end marker
     collector.last_rx -= 10  # force the idle window to have elapsed
+    assert collector.idle_report(2.0) is not None
+
+
+def test_idle_report_does_nothing_before_a_report_has_started():
+    collector = StreamCollector()
+    collector.add(b"\x02\x02 stray line noise, no start marker \x02\x02")
+    collector.last_rx -= 10
     assert collector.idle_report(2.0) is None
 
 

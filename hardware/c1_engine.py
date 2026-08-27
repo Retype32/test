@@ -48,10 +48,6 @@ class ReportParseError(Exception):
     """A report was received but its contents could not be trusted."""
 
 
-class DuplicateReportError(Exception):
-    """This exact report has already been read and booked once."""
-
-
 def strip_escpos(data: bytes) -> str:
     """Remove common ESC/P commands and raster payloads while preserving text."""
     result = bytearray()
@@ -310,13 +306,22 @@ class StreamCollector:
             search_from = end + 1
 
     def idle_report(self, idle_seconds: float) -> bytes | None:
+        """Emit a started-but-unterminated report once the line goes quiet.
+
+        This is the fallback for firmware that omits ESC i, and also the
+        only path by which a *malformed* report reaches the parser: the
+        end-marker short-circuit above deliberately refuses to fire without
+        a totals line, so without this a report that arrived garbled would
+        never be framed at all and would silently time out instead of
+        telling anyone it was rejected. Whatever is buffered is handed to
+        the parser, which decides whether it can be trusted -- framing does
+        not get to make that call.
+        """
         if self.started and self.buffer and time.monotonic() - self.last_rx >= idle_seconds:
-            cleaned = strip_escpos(bytes(self.buffer))
-            if "Total" in cleaned or "Reject Qty" in cleaned:
-                report = bytes(self.buffer)
-                self.buffer.clear()
-                self.started = False
-                return report
+            report = bytes(self.buffer)
+            self.buffer.clear()
+            self.started = False
+            return report
         return None
 
     def final_partial(self) -> bytes | None:

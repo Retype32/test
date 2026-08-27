@@ -2,30 +2,38 @@
 Shared, process-wide connection to the G+D BPS C1 banknote counter.
 
 Built on the connection and framing approach proven by the standalone C1
-Checker (C1 Check.py at the project root) against a real machine: open the
-machine's serial printer port directly at 115200 8N1 no handshake, never
-write a byte to it, frame each report by its own "NO:"/"ESC i" markers, and
-never trust a report whose printed totals disagree with its own
-denomination lines. See hardware/c1_engine.py for that logic.
+Checker (C1 Check.py at the project root) against a real machine. The
+central idea, and the reason this module looks the way it does:
 
-Opened once when the app starts and held for as long as it runs, instead of
-per transaction. A serial port has exactly one owner, so Nexus claims it
-immediately on start.bat and keeps it -- nothing else on the PC can take it
-out from under a wizard mid-count. Every read shares this one connection
-and is therefore serialised, which is fine: there is only one physical
-machine to read from regardless of how many wizard tabs are open.
+    The port is opened once and listened to CONTINUOUSLY, by a background
+    reader thread, for as long as the app runs.
 
-The startup attempt is not the only chance to get it, though. If the
-machine was not yet ready when Nexus started (COM port still enumerating,
-ISA still holding it for a moment), or the connection dies later (cable
-pulled, USB device re-enumerated), wait_for_shared_count() below reconnects
-on demand instead of reporting "not connected" for the rest of the
-process's life just because the very first attempt lost a race.
+That matters because the C1 is a printer, not a request/response device.
+It prints when the operator ends a batch, on its own schedule -- which is
+frequently *before* the cashier reaches the Count Cash screen. A reader
+that only listens while a request is in flight silently loses those
+reports: the bytes land in the OS receive buffer and are discarded by the
+next read. The checker never loses one because it is always listening,
+with a single long-lived StreamCollector spanning the whole session, and
+this module now does the same. Reports counted between polls are queued,
+not dropped.
+
+A serial port has exactly one owner, so Nexus claims it on startup and
+keeps it. Note that this cuts both ways: while C1 Check.py (or ISA) holds
+the port, Nexus cannot open it, and vice versa. Run one at a time.
+
+The startup attempt is not the only chance to get it. If the machine was
+not ready when Nexus started (COM port still enumerating, ISA still
+holding it for a moment), or the connection dies later (cable pulled, USB
+device re-enumerated), wait_for_shared_count() reconnects on demand
+instead of reporting "not connected" for the rest of the process's life
+just because the very first attempt lost a race.
 """
 
 from __future__ import annotations
 
 import logging
+import queue
 import threading
 import time
 from dataclasses import dataclass, field
@@ -35,7 +43,6 @@ from pathlib import Path
 import serial  # pyserial
 
 from .c1_engine import (
-    DuplicateReportError,
     ReportParseError,
     SeenReports,
     StreamCollector,
@@ -64,7 +71,7 @@ def _open_failure_message(port_name: str, exc: Exception) -> str:
     """Explain a failed port open in terms of what actually goes wrong on site.
 
     Windows reports a port that another program already owns as a bare
-    "Access is denied", which gives no hint that ISA is usually the owner.
+    "Access is denied", which gives no hint about who the owner usually is.
     """
     detail = str(exc)
     lowered = detail.lower()
@@ -72,13 +79,15 @@ def _open_failure_message(port_name: str, exc: Exception) -> str:
     if "access is denied" in lowered or "permission" in lowered:
         return (
             f"Serial port {port_name} is already in use by another program.\n"
-            "A serial port has exactly one owner. If ISA is running on this PC "
-            "it holds the machine's printer port open for as long as its BPS C1 "
-            "plugin is loaded, which locks Nexus out.\n"
-            "Options: close ISA, give the machine a second report output on "
-            "another interface if its firmware supports one, run Nexus on a "
-            "separate PC, or split the line with a passive Y-cable so both "
-            "hosts receive the same printout.\n"
+            "A serial port has exactly one owner. The usual culprits are "
+            "C1 Check.py still running in another window, or ISA -- its BPS C1 "
+            "plugin holds the machine's printer port for as long as the plugin "
+            "is loaded, which locks Nexus out.\n"
+            "Close whichever one is running and try again. If ISA must stay up, "
+            "the options are: give the machine a second report output on another "
+            "interface if its firmware supports one, run Nexus on a separate PC, "
+            "or split the line with a passive Y-cable so both hosts receive the "
+            "same printout.\n"
             f"Original error: {detail}"
         )
 
@@ -94,11 +103,21 @@ def _open_failure_message(port_name: str, exc: Exception) -> str:
 
 
 class C1Counter:
-    """Reads BPS C1 batch reports from the machine's serial printer port."""
+    """Reads BPS C1 batch reports from the machine's serial printer port.
+
+    connect() starts a background reader that listens continuously and
+    queues every finished batch; wait_for_count_result() takes the next one
+    off that queue. Nothing the machine prints while no one is waiting is
+    lost.
+    """
 
     def __init__(self) -> None:
         self._port: serial.Serial | None = None
         self._seen = SeenReports(_SEEN_REPORTS_PATH)
+        self._queue: queue.Queue = queue.Queue()
+        self._reader: threading.Thread | None = None
+        self._stop = threading.Event()
+        self._dead: Exception | None = None
 
     def connect(self) -> bool:
         try:
@@ -125,35 +144,120 @@ class C1Counter:
         # against a real machine.
         self._port.rts = False
         self._port.dtr = False
+
+        # The only buffer flush in the driver, and it happens here rather
+        # than per read: whatever is sitting in the port from before Nexus
+        # owned it is not ours to book. From this point on nothing is ever
+        # discarded -- see the class docstring.
         self._port.reset_input_buffer()
+
+        self._start_reader()
         logger.info("Listening on %s at %s baud.", COUNTER_COM_PORT, COUNTER_BAUD_RATE)
         return True
 
     def disconnect(self) -> None:
+        self._stop.set()
+        reader, self._reader = self._reader, None
+        if reader is not None and reader.is_alive():
+            reader.join(timeout=2.0)
         if self._port and self._port.is_open:
             self._port.close()
             logger.info("Port closed.")
         self._port = None
 
     def wait_for_count_result(self, timeout_seconds: int = 120) -> CountResult:
-        raw = self._read_raw_report(timeout_seconds)
-        text = strip_escpos(raw)
-        report = parse_and_validate(text)
+        """Return the next finished batch, waiting up to timeout_seconds.
+
+        Batches the machine printed while nobody was waiting are already
+        queued and come back immediately.
+        """
+        if self._reader is None:
+            raise RuntimeError("Not connected. Call connect() first.")
+
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            if self._dead is not None:
+                raise self._dead
+            try:
+                item = self._queue.get(timeout=0.25)
+            except queue.Empty:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        f"No report received within {timeout_seconds}s. Check that "
+                        "the C1 report output is routed to the serial port and that "
+                        "the cable and line settings match (115200 8N1, no handshake)."
+                    )
+                continue
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+    # ── background reader ─────────────────────────────────────────────────
+
+    def _start_reader(self) -> None:
+        self._stop.clear()
+        self._dead = None
+        self._reader = threading.Thread(
+            target=self._read_forever, name="c1-reader", daemon=True
+        )
+        self._reader.start()
+
+    def _read_forever(self) -> None:
+        """Listen continuously, framing and queueing every batch.
+
+        One StreamCollector for the whole connection, exactly as the
+        standalone checker does it: a report split across many reads is
+        reassembled, and several reports arriving together are all queued
+        rather than the first one winning and the rest being dropped.
+        """
+        collector = StreamCollector()
+        while not self._stop.is_set():
+            try:
+                chunk = self._port.read(4096)
+            except (serial.SerialException, OSError) as exc:
+                # The port itself has died (cable pulled, device
+                # re-enumerated). Record it so the waiting request fails
+                # with the real reason and the shared connection is dropped.
+                if not self._stop.is_set():
+                    logger.exception("Serial port failed while listening.")
+                    self._dead = serial.SerialException(str(exc))
+                return
+
+            if chunk:
+                for raw in collector.add(chunk):
+                    self._handle_report(raw)
+            else:
+                idle = collector.idle_report(_IDLE_TIMEOUT_SECONDS)
+                if idle:
+                    self._handle_report(idle)
+
+    def _handle_report(self, raw: bytes) -> None:
+        """Parse, validate and queue one framed report."""
+        try:
+            report = parse_and_validate(strip_escpos(raw))
+        except ReportParseError as exc:
+            # A report that fails its own arithmetic is worth surfacing to
+            # the cashier -- it usually means a partial read, and silently
+            # swallowing it would look like the machine never printed.
+            logger.warning("Rejected a report that failed validation: %s", exc)
+            self._queue.put(exc)
+            return
 
         if self._seen.contains(report.fingerprint):
-            raise DuplicateReportError(
-                f"Report {report.report_number or '?'} has already been read. "
-                "The machine may be re-sending the same batch (a receipt "
-                "reprint, or a repeated poll) -- run a fresh batch on the "
-                "machine if you meant to count something new."
+            # A re-delivered report (receipt reprint, the machine repeating
+            # itself) must never be booked twice. It is also not an error
+            # worth interrupting the cashier over, so it is dropped quietly.
+            logger.info(
+                "Ignoring report %s — already read and booked.", report.report_number or "?"
             )
+            return
         self._seen.add(report.fingerprint)
 
-        if report.report_number:
-            logger.info(
-                "Report %s (user %s, machine SN %s)",
-                report.report_number, report.user_id or "?", report.machine_serial_number or "?",
-            )
+        logger.info(
+            "Report %s (user %s, machine SN %s): %s",
+            report.report_number or "?", report.user_id or "?",
+            report.machine_serial_number or "?", report.denominations,
+        )
 
         denominations = dict(report.denominations)
         if report.coin_amount:
@@ -163,47 +267,7 @@ class C1Counter:
             denominations["Coins"] = int(
                 report.coin_amount.to_integral_value(rounding=ROUND_HALF_UP)
             )
-
-        return CountResult(denominations=denominations, raw_response=raw)
-
-    # ── internals ─────────────────────────────────────────────────────────
-
-    def _read_raw_report(self, timeout_seconds: int) -> bytes:
-        """Block until one full report has been received, framed by
-        StreamCollector's "NO:"/"ESC i" markers with an idle-timeout fallback."""
-        if not self._port or not self._port.is_open:
-            raise RuntimeError("Not connected. Call connect() first.")
-
-        # Each call is meant to capture exactly one fresh batch. Drop
-        # anything still sitting in the port's receive buffer from before
-        # this call -- trailing bytes a previous report's burst left behind
-        # would otherwise prefix this read and desync every batch after it.
-        self._port.reset_input_buffer()
-
-        collector = StreamCollector()
-        deadline = time.monotonic() + timeout_seconds
-
-        while True:
-            chunk = self._port.read(4096)
-            if chunk:
-                reports = collector.add(chunk)
-                if reports:
-                    return reports[0]
-            else:
-                idle = collector.idle_report(_IDLE_TIMEOUT_SECONDS)
-                if idle:
-                    return idle
-
-            if time.monotonic() >= deadline:
-                partial = collector.final_partial()
-                if partial:
-                    logger.warning("Timeout with %d bytes buffered; parsing what arrived.", len(partial))
-                    return partial
-                raise TimeoutError(
-                    f"No report received within {timeout_seconds}s. Check that "
-                    "the C1 report output is routed to the serial port and that "
-                    "the cable and line settings match (115200 8N1, no handshake)."
-                )
+        self._queue.put(CountResult(denominations=denominations, raw_response=raw))
 
 
 # ── process-wide shared singleton ───────────────────────────────────────────
@@ -236,16 +300,31 @@ def _connect_locked() -> C1Counter | None:
 
 
 def open_shared_counter() -> None:
-    """Connect the process-wide counter. Call once from app startup."""
+    """Connect the process-wide counter. Call once from app startup.
+
+    Every outcome here is logged at WARNING or above, deliberately. Whether
+    the counter came up is the single most useful line in the startup log
+    for anyone diagnosing "the machine is unavailable", and an INFO that
+    something else's log configuration can quietly drop is worse than
+    useless -- it looks like nothing happened at all.
+    """
     global _shared
     if not COUNTER_COM_PORT:
-        logger.info("COUNTER_COM_PORT is not set — no cash counter will be connected.")
+        logger.warning(
+            "CASH COUNTER DISABLED — COUNTER_COM_PORT is set to none/off in .env. "
+            "The Count Cash screen will ask cashiers to enter counts manually."
+        )
         return
     with _shared_lock:
         _shared = _connect_locked()
         if _shared is None:
-            logger.warning("Continuing without it. The next count request will "
-                            "retry the connection automatically.")
+            logger.warning(
+                "CASH COUNTER NOT CONNECTED on %s — see the error above. Continuing "
+                "without it; the next count request retries automatically.",
+                COUNTER_COM_PORT,
+            )
+        else:
+            logger.warning("CASH COUNTER READY — listening on %s.", COUNTER_COM_PORT)
 
 
 def close_shared_counter() -> None:
@@ -263,10 +342,19 @@ def wait_for_shared_count(timeout_seconds: int = 120) -> CountResult:
     Reconnects on demand if the shared connection was never established or
     has since gone stale, so a machine that is genuinely connected now isn't
     reported as unreachable just because an earlier attempt was not.
+
+    The lock is held only long enough to resolve (or establish) the shared
+    connection -- never for the blocking wait itself. Several wizard windows
+    can therefore wait at once instead of queueing behind whichever one got
+    there first; the machine's batches are handed out in the order they were
+    printed.
     """
     global _shared
     if not COUNTER_COM_PORT:
-        raise ConnectionError("No cash counter is configured. Enter counts manually.")
+        raise ConnectionError(
+            "No cash counter is configured (COUNTER_COM_PORT is set to none/off "
+            "in .env). Enter counts manually."
+        )
 
     with _shared_lock:
         if _shared is None:
@@ -277,19 +365,21 @@ def wait_for_shared_count(timeout_seconds: int = 120) -> CountResult:
                     "then try again."
                 )
         counter = _shared
-        try:
-            return counter.wait_for_count_result(timeout_seconds)
-        except serial.SerialException:
-            # The port itself has died (cable pulled, device re-enumerated).
-            # Holding on to it would only fail the same way on every future
-            # request, so drop it and let the next request open a fresh
-            # connection instead of requiring a full app restart.
-            counter.disconnect()
-            _shared = None
-            raise
+
+    try:
+        return counter.wait_for_count_result(timeout_seconds)
+    except serial.SerialException:
+        # The port has died. Holding on to it would only fail the same way
+        # on every future request, so drop it and let the next request open
+        # a fresh connection instead of requiring a full app restart.
+        with _shared_lock:
+            if _shared is counter:
+                counter.disconnect()
+                _shared = None
+        raise
 
 
 __all__ = [
-    "CountResult", "C1Counter", "ReportParseError", "DuplicateReportError",
+    "CountResult", "C1Counter", "ReportParseError",
     "get_counter", "open_shared_counter", "close_shared_counter", "wait_for_shared_count",
 ]

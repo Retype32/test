@@ -16,6 +16,20 @@ _LOG_FILE = os.path.join(_LOG_DIR, "nexus.log")
 _configured = False
 
 
+def is_configured() -> bool:
+    """True once the app has set up its own logging.
+
+    Alembic's env.py checks this before applying the logging config in
+    alembic.ini. That config declares ``[logger_root] level = WARNING`` with
+    a single stderr handler, and applying it mid-startup would replace the
+    root handlers set up here -- taking the rotating nexus.log file handler
+    with them and raising the root level to WARNING. Every INFO the app
+    logged after startup then vanished, from both the console and the log
+    file, which is exactly the state you do not want to debug hardware in.
+    """
+    return _configured
+
+
 def configure_logging(level: int = logging.INFO) -> None:
     global _configured
     if _configured:
