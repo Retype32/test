@@ -1,6 +1,8 @@
-from fastapi import APIRouter, Request, Form, HTTPException
+from typing import Annotated
+from fastapi import APIRouter, Request, Form, HTTPException, Depends
 from fastapi.responses import RedirectResponse
 from backend.core.catalogs import CatalogCode, catalog_display_name
+from backend.core.security import require_csrf
 from ..templating import templates
 from ..deps import WebCurrentUser
 
@@ -14,7 +16,12 @@ async def catalog_select_form(request: Request, current_user: WebCurrentUser):
 
 
 @router.post("/catalog/select")
-async def catalog_select_submit(request: Request, current_user: WebCurrentUser, code: str = Form(...)):
+async def catalog_select_submit(
+    request: Request,
+    current_user: WebCurrentUser,
+    _csrf: Annotated[None, Depends(require_csrf)],
+    code: str = Form(...),
+):
     try:
         catalog_code = CatalogCode(code)
     except ValueError:

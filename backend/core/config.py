@@ -23,6 +23,16 @@ class Settings(BaseSettings):
     debug: bool = True
     session_cookie_secure: bool = False
 
+    # "development" (default) or "production", read from ENVIRONMENT.
+    # Every hardening check added for Phase 4 (SECRET_KEY validation,
+    # auto-seed gating, CSRF enforcement, HSTS, startup secure-cookie
+    # enforcement) is gated on this flag being exactly "production" -- the
+    # default keeps today's permissive local/dev/test behavior completely
+    # unchanged. See docs/production_readiness/06_consolidated_plan.md §13
+    # (rollback strategy): production posture is opt-in, never silently
+    # flipped on in dev.
+    environment: str = "development"
+
     class Config:
         env_file = ".env"
         extra = "ignore"

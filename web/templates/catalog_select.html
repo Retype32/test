@@ -28,6 +28,7 @@
         <div class="auth-body">
             {% for c in catalogs %}
             <form method="post" action="/web/catalog/select">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
                 <input type="hidden" name="code" value="{{ c.code }}">
                 <button type="submit" class="catalog-option">
                     <span class="cat-mark" aria-hidden="true">{{ c.code[:2].upper() }}</span>

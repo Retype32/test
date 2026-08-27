@@ -27,6 +27,7 @@
     <div class="card-header">CORRECTED VALUES</div>
     <div class="card-body">
         <form method="post" action="/web/transactions/{{ txn.transaction_id }}/correct">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
             <input type="hidden" name="idempotency_nonce" value="{{ idempotency_nonce }}">
             <div class="form-row">
                 <div class="form-group">

@@ -8,6 +8,7 @@
     <div class="card-header">CLOSE A BUSINESS DAY</div>
     <div class="card-body">
         <form method="post" action="/web/eod/close">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
             <div class="form-row">
                 <div class="form-group">
                     <label>Business Date</label>
@@ -53,6 +54,7 @@
                 <td>
                     {% if c.status.value == "closed" %}
                     <form method="post" action="/web/eod/reopen" style="display:flex; gap:6px;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
                         <input type="hidden" name="business_date" value="{{ c.business_date }}">
                         <input type="text" name="reason" placeholder="Reason" required style="width:160px;">
                         <button class="btn btn-sm" type="submit">Reopen</button>

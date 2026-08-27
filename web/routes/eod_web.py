@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request, Depends, Form
 from fastapi.responses import RedirectResponse
 from backend.core.catalogs import CatalogCode
 from backend.services.eod_service import EODService
+from backend.core.security import require_csrf
 from ..templating import templates
 from ..deps import WebSupervisorOrAbove, WebAdminOnly, WebCatalogDB, get_web_catalog_code
 from ..context import build_nav_context
@@ -37,6 +38,7 @@ async def close_day(
     request: Request,
     current_user: WebSupervisorOrAbove,
     db: WebCatalogDB,
+    _csrf: Annotated[None, Depends(require_csrf)],
     business_date: date = Form(...),
 ):
     service = EODService(db)
@@ -52,6 +54,7 @@ async def reopen_day(
     request: Request,
     current_user: WebAdminOnly,
     db: WebCatalogDB,
+    _csrf: Annotated[None, Depends(require_csrf)],
     business_date: date = Form(...),
     reason: str = Form(...),
 ):

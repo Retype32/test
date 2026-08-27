@@ -8,6 +8,7 @@ from backend.services import backup_service
 from backend.repositories.core_audit_repository import CoreAuditRepository
 from backend.models.user import UserRole
 from backend.schemas.user import UserCreate, UserUpdate
+from backend.core.security import require_csrf
 from ..templating import templates
 from ..deps import WebAdminOnly, WebCoreDB, WebCatalogDB, get_web_catalog_code
 from ..context import build_nav_context
@@ -38,6 +39,7 @@ async def create_user(
     core_db: WebCoreDB,
     catalog_db: WebCatalogDB,
     catalog_code: Annotated[CatalogCode, Depends(get_web_catalog_code)],
+    _csrf: Annotated[None, Depends(require_csrf)],
     username: str = Form(...),
     password: str = Form(...),
     role: str = Form(...),
@@ -65,6 +67,7 @@ async def set_user_active(
     user_id: uuid.UUID,
     current_user: WebAdminOnly,
     core_db: WebCoreDB,
+    _csrf: Annotated[None, Depends(require_csrf)],
     is_active: bool = Form(...),
 ):
     service = AuthService(core_db)
@@ -83,6 +86,7 @@ async def edit_user(
     core_db: WebCoreDB,
     catalog_db: WebCatalogDB,
     catalog_code: Annotated[CatalogCode, Depends(get_web_catalog_code)],
+    _csrf: Annotated[None, Depends(require_csrf)],
     username: str = Form(...),
     password: str = Form(""),
     role: str = Form(...),
@@ -128,6 +132,7 @@ async def create_backup(
     core_db: WebCoreDB,
     catalog_db: WebCatalogDB,
     catalog_code: Annotated[CatalogCode, Depends(get_web_catalog_code)],
+    _csrf: Annotated[None, Depends(require_csrf)],
 ):
     result = await backup_service.create_backup()
     audit_repo = CoreAuditRepository(core_db)
@@ -154,6 +159,7 @@ async def delete_user(
     core_db: WebCoreDB,
     catalog_db: WebCatalogDB,
     catalog_code: Annotated[CatalogCode, Depends(get_web_catalog_code)],
+    _csrf: Annotated[None, Depends(require_csrf)],
 ):
     service = AuthService(core_db)
     error_message = None

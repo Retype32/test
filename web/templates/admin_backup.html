@@ -13,6 +13,7 @@
             while the system is in active use.
         </p>
         <form method="post" action="/web/admin/backup">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
             <button class="btn btn-primary" type="submit">BACKUP NOW</button>
         </form>
     </div>

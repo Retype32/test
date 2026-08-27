@@ -89,6 +89,7 @@
     <div class="card-header">TRANSFER TO ANOTHER DAY</div>
     <div class="card-body">
         <form method="post" action="/web/transactions/{{ txn.transaction_id }}/transfer">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
             <div class="form-row">
                 <div class="form-group">
                     <label>New Business Date</label>

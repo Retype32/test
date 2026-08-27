@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request, Depends
 from fastapi.responses import RedirectResponse
 from backend.core.catalogs import CatalogCode
 from backend.services.notification_service import NotificationService
+from backend.core.security import require_csrf
 from ..templating import templates
 from ..deps import WebSupervisorOrAbove, WebCatalogDB, get_web_catalog_code
 from ..context import build_nav_context
@@ -31,6 +32,7 @@ async def resolve_notification(
     notification_id: uuid.UUID,
     current_user: WebSupervisorOrAbove,
     db: WebCatalogDB,
+    _csrf: Annotated[None, Depends(require_csrf)],
 ):
     service = NotificationService(db)
     try:

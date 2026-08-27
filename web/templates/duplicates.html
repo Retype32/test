@@ -30,10 +30,12 @@
                 <td>{{ row.matched_fields }}</td>
                 <td>
                     <form method="post" action="/web/duplicates/{{ row.flag.id }}/review" style="display:flex; gap:6px;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
                         <input type="hidden" name="status" value="confirmed">
                         <button class="btn btn-sm btn-danger" type="submit">Confirm</button>
                     </form>
                     <form method="post" action="/web/duplicates/{{ row.flag.id }}/review" style="display:flex; gap:6px; margin-top:4px;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
                         <input type="hidden" name="status" value="dismissed">
                         <button class="btn btn-sm" type="submit">Dismiss</button>
                     </form>

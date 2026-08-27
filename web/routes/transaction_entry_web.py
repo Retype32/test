@@ -9,6 +9,7 @@ from backend.core.catalogs import CatalogCode
 from backend.services.customer_service import CustomerService
 from backend.services.transaction_service import TransactionService, DENOMINATION_VALUES
 from backend.schemas.transaction import TransactionCreate, DenominationEntry
+from backend.core.security import require_csrf
 from ..templating import templates
 from ..deps import WebCurrentUser, WebCatalogDB, get_web_catalog_code
 from ..context import build_nav_context
@@ -153,6 +154,7 @@ async def wizard_customer_submit(
     request: Request,
     current_user: WebCurrentUser,
     db: WebCatalogDB,
+    _csrf: Annotated[None, Depends(require_csrf)],
     customer_id: str = Form(...),
     location_id: str = Form(...),
 ):
@@ -202,6 +204,7 @@ async def wizard_bag_form(request: Request, current_user: WebCurrentUser):
 async def wizard_bag_submit(
     request: Request,
     current_user: WebCurrentUser,
+    _csrf: Annotated[None, Depends(require_csrf)],
     bag_number: str = Form(...),
     amount: str = Form(""),
 ):
@@ -247,6 +250,7 @@ async def wizard_wallet_form(request: Request, current_user: WebCurrentUser):
 async def wizard_wallet_submit(
     request: Request,
     current_user: WebCurrentUser,
+    _csrf: Annotated[None, Depends(require_csrf)],
     wallet_id: str = Form(...),
 ):
     draft = _draft(request)
@@ -284,6 +288,7 @@ async def wizard_cash_form(request: Request, current_user: WebCurrentUser):
 async def wizard_cash_submit(
     request: Request,
     current_user: WebCurrentUser,
+    _csrf: Annotated[None, Depends(require_csrf)],
     count_500: str = Form("0"),
     count_200: str = Form("0"),
     count_100: str = Form("0"),
@@ -338,6 +343,7 @@ async def wizard_complete(
     current_user: WebCurrentUser,
     db: WebCatalogDB,
     catalog_code: Annotated[CatalogCode, Depends(get_web_catalog_code)],
+    _csrf: Annotated[None, Depends(require_csrf)],
     idempotency_nonce: str = Form(""),
 ):
     draft = _draft(request)
@@ -430,6 +436,7 @@ async def wizard_next_wallet_form(request: Request, current_user: WebCurrentUser
 async def wizard_next_wallet_submit(
     request: Request,
     current_user: WebCurrentUser,
+    _csrf: Annotated[None, Depends(require_csrf)],
     wallet_id: str = Form(...),
     amount: str = Form(""),
 ):

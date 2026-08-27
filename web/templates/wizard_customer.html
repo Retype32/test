@@ -5,6 +5,7 @@
 {% block content %}
 
 <form method="post" action="/web/transactions/new/wizard/customer" id="customer-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
     <div class="form-group">
         <label for="customer_id">Customer ID</label>
         <input type="text" id="customer_id" name="customer_id" class="scan-input num"

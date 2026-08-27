@@ -45,6 +45,7 @@
 <div class="btn-group" style="margin-top:var(--s-6);">
     <a href="/web/transactions/new/wizard/cash" class="btn">&#9668; Edit Count</a>
     <form method="post" action="/web/transactions/new/wizard/complete" style="flex:1;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
         <input type="hidden" name="idempotency_nonce" value="{{ draft.idempotency_nonce }}">
         <button type="submit" class="btn btn-primary btn-lg" style="width:100%;">Accept Transaction &#10003;</button>
     </form>

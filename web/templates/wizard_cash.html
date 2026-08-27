@@ -14,6 +14,7 @@
 </div>
 
 <form method="post" action="/web/transactions/new/wizard/cash" id="cash-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
 
     <div class="cash-toolbar">
         <div class="mode-toggle" role="group" aria-label="Manual entry mode">

@@ -84,6 +84,21 @@ def _thin_border():
     return Border(left=thin, right=thin, top=thin, bottom=thin)
 
 
+# S-07: CSV/Excel formula injection. Any string value starting with one of
+# these characters is interpreted as a formula by Excel/LibreOffice/Sheets
+# when the exported file is opened -- applied generically to every string
+# cell this report writes (not just wallet_id, the field the review called
+# out), since any user-derived field could carry the same risk if the data
+# model ever grows a new one.
+_FORMULA_TRIGGER_CHARS = ("=", "+", "-", "@")
+
+
+def _neutralize_formula_injection(value):
+    if isinstance(value, str) and value.startswith(_FORMULA_TRIGGER_CHARS):
+        return "'" + value
+    return value
+
+
 def _build_row(t: dict) -> dict:
     denoms = {d["denomination"]: d for d in t.get("denominations", [])}
 
@@ -107,7 +122,7 @@ def _build_row(t: dict) -> dict:
         else str(t.get("created_at", ""))
     )
 
-    return {
+    row = {
         "Collection Date":       date_str,
         "Processed Date":        date_str,
         "Customer ID":           t.get("customer_id", ""),
@@ -135,6 +150,10 @@ def _build_row(t: dict) -> dict:
         "Payment":               "",
         "Adjustment Reason":     "",
     }
+    # S-07: neutralize formula injection generically across every column,
+    # applied once here so both the xlsx and csv writers below get it for
+    # free without needing their own sanitization pass.
+    return {key: _neutralize_formula_injection(val) for key, val in row.items()}
 
 
 def build_transactions_excel(transactions: list[dict], output_path: str) -> str:

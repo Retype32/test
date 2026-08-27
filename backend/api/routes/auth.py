@@ -1,21 +1,39 @@
+import logging
 import uuid
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from ...services.auth_service import AuthService
 from ...schemas.user import LoginRequest, TokenResponse, UserCreate, UserUpdate, UserResponse, UserActiveUpdate
+from ...core import rate_limiter
 from ..deps import AdminOnly, CoreDB
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+logger = logging.getLogger("nexus.auth")
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(data: LoginRequest, db: CoreDB):
+async def login(data: LoginRequest, db: CoreDB, request: Request):
+    client_ip = rate_limiter.client_ip_from_request(request)
+    remaining = rate_limiter.seconds_until_unlocked(data.username, client_ip)
+    if remaining:
+        logger.warning(
+            "login blocked (lockout active): username=%s ip=%s remaining=%.0fs",
+            data.username, client_ip, remaining,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many failed login attempts. Try again in {int(remaining) + 1}s.",
+        )
+
     service = AuthService(db)
     result = await service.login(data.username, data.password)
     if not result:
+        rate_limiter.record_failure(data.username, client_ip)
+        logger.warning("login failed: username=%s ip=%s", data.username, client_ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
         )
+    rate_limiter.record_success(data.username, client_ip)
     return result
 
 

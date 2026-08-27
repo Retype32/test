@@ -7,6 +7,8 @@ from ...schemas.transaction import (
     TransactionCreate, TransactionResponse, TransactionTransferRequest, TransactionCorrectRequest,
 )
 from ...core.catalogs import CatalogCode
+from ...core.config import settings
+from ...models.user import User, UserRole
 from ..deps import CurrentUser, SupervisorOrAbove, AdminOnly, CatalogDB, get_catalog_code
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
@@ -70,11 +72,34 @@ async def list_transactions(
     return [TransactionResponse.model_validate(t) for t in transactions]
 
 
+async def _get_transaction_by_id_guard(current_user: CurrentUser) -> User:
+    """S-12: the API's single-transaction read used to allow any
+    authenticated role (any cashier could read any transaction's UUID
+    directly), inconsistent with the web portal and the list endpoint,
+    which are both supervisor+. Tightened to match here -- but only in
+    production mode: the existing test suite has a passing, unmodifiable
+    regression test (test_transactions_api.py::test_get_transaction_by_id)
+    asserting a cashier CAN read their own transaction by id via this exact
+    route in today's (development) configuration, so tightening this
+    unconditionally would both violate "don't break the existing suite" and
+    fall outside this phase's own no-mode-gating exceptions (which are
+    limited to S-10/S-04/the max_age fix). Gating it here is the resolution
+    consistent with the brief's overarching "opt-in production hardening,
+    unchanged dev behavior" rule.
+    """
+    if settings.environment == "production" and current_user.role not in (
+        UserRole.supervisor, UserRole.administrator,
+    ):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    return current_user
+
+
 @router.get("/{transaction_id}", response_model=TransactionResponse)
 async def get_transaction(
     transaction_id: uuid.UUID,
     db: CatalogDB,
-    _: CurrentUser,
+    _: Annotated[User, Depends(_get_transaction_by_id_guard)],
 ):
     service = TransactionService(db)
     txn = await service.get_transaction(transaction_id)

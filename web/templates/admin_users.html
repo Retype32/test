@@ -8,6 +8,7 @@
     <div class="card-header">CREATE USER</div>
     <div class="card-body">
         <form method="post" action="/web/admin/users">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
             <div class="form-row">
                 <div class="form-group">
                     <label>Username</label>
@@ -55,11 +56,13 @@
                         <span class="text-muted">(you)</span>
                         {% else %}
                         <form method="post" action="/web/admin/users/{{ u.id }}/active">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
                             <input type="hidden" name="is_active" value="{{ 'false' if u.is_active else 'true' }}">
                             <button class="btn btn-sm" type="submit">{{ "Deactivate" if u.is_active else "Activate" }}</button>
                         </form>
                         <form method="post" action="/web/admin/users/{{ u.id }}/delete"
                               onsubmit="return confirm('Remove {{ u.username }}? This cannot be undone.');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
                             <button class="btn btn-sm btn-ghost" type="submit" style="color:var(--bad-fg);">Remove</button>
                         </form>
                         {% endif %}
@@ -69,6 +72,7 @@
             <tr id="edit-row-{{ u.id }}" class="edit-row" hidden>
                 <td colspan="4">
                     <form method="post" action="/web/admin/users/{{ u.id }}/edit" class="form-row" style="margin:0;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
                         <div class="form-group">
                             <label>Username</label>
                             <input type="text" name="username" value="{{ u.username }}" required>

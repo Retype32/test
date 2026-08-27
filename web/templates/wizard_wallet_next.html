@@ -11,6 +11,7 @@
 </div>
 
 <form method="post" action="/web/transactions/new/wizard/wallet/next" id="next-wallet-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
     <div class="form-group">
         <label for="wallet_id">Wallet ID</label>
         <input type="text" id="wallet_id" name="wallet_id" class="scan-input"

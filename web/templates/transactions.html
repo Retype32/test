@@ -41,6 +41,7 @@
 
 {% if is_admin %}
 <form method="post" action="/web/transactions/bulk-transfer" id="bulk-transfer-form">
+<input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
 <div class="card">
     <div class="card-header">BULK TRANSFER SELECTED</div>
     <div class="card-body">
@@ -146,6 +147,7 @@
     <div class="card-header">TRANSFER ALL OF ONE CASHIER'S TRANSACTIONS</div>
     <div class="card-body">
         <form method="post" action="/web/transactions/transfer-cashier">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
             <div class="form-row">
                 <div class="form-group">
                     <label>Cashier</label>

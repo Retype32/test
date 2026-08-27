@@ -5,6 +5,7 @@ from fastapi import APIRouter, Request, Depends, Form
 from fastapi.responses import RedirectResponse
 from backend.core.catalogs import CatalogCode
 from backend.services.duplicate_detection_service import DuplicateDetectionService
+from backend.core.security import require_csrf
 from ..templating import templates
 from ..deps import WebSupervisorOrAbove, WebCatalogDB, get_web_catalog_code
 from ..context import build_nav_context
@@ -43,6 +44,7 @@ async def review_duplicate(
     flag_id: uuid.UUID,
     current_user: WebSupervisorOrAbove,
     db: WebCatalogDB,
+    _csrf: Annotated[None, Depends(require_csrf)],
     status: str = Form(...),
     notes: str = Form(None),
 ):

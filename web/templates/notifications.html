@@ -26,6 +26,7 @@
                     <a class="btn btn-sm" href="/web/duplicates">Review in Duplicates</a>
                     {% else %}
                     <form method="post" action="/web/notifications/{{ n.id }}/resolve">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
                         <button class="btn btn-sm" type="submit">Dismiss</button>
                     </form>
                     {% endif %}

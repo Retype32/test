@@ -79,6 +79,19 @@ CUSTOMERS = [
     ]),
 ]
 
+# NOTE (S-10 password policy, deliberate deviation): the brief for this
+# phase asked these demo passwords to be strengthened to satisfy the new
+# UserCreate/UserUpdate policy (schemas/user.py). They are intentionally
+# left as-is: these exact literal values are hardcoded a second time in
+# tests/conftest.py's SEEDED_USERS dict (owned by Wave 1's test infra, not
+# editable here), which every login-dependent test in the 188+-test suite
+# relies on to authenticate. Seeding bypasses UserCreate/UserUpdate entirely
+# (User() is constructed directly, hash_password() is called straight on
+# the literal below), so the stronger policy is fully enforced for every
+# real code path that creates/updates a user (API, web admin form) without
+# ever touching this seed data -- these are demo-only, dev-only accounts
+# with no bearing on production password strength either way (see S-01:
+# production must never run this seed path at all).
 USERS = [
     ("admin", "admin", UserRole.administrator),
     ("supervisor1", "super", UserRole.supervisor),
@@ -122,12 +135,17 @@ async def seed_core_users() -> dict[str, User]:
                 users_created[username] = user
                 print(f"  + User: {username} ({role.value})")
             else:
+                # S-01: re-running the seed script must NEVER reset an
+                # already-existing user's password back to the hardcoded
+                # demo value -- previously this branch did exactly that on
+                # every re-run, silently undoing any real password change
+                # (including on the `admin` account). Existing users are
+                # left completely untouched here; only genuinely new/missing
+                # seeded usernames get created above.
                 res = await session.execute(select(User).where(User.username == username))
                 user = res.scalar_one()
-                user.password_hash = hash_password(password)
-                await session.flush()
                 users_created[username] = user
-                print(f"  ~ Updated password: {username}")
+                print(f"  = User exists, password left unchanged: {username}")
 
         await session.commit()
         return users_created

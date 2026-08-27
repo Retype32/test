@@ -7,6 +7,7 @@ from backend.core.catalogs import CatalogCode
 from backend.services.transaction_service import TransactionService, DENOMINATION_VALUES
 from backend.services.auth_service import AuthService
 from backend.schemas.transaction import TransactionCreate, DenominationEntry
+from backend.core.security import require_csrf
 from ..templating import templates
 from ..deps import WebSupervisorOrAbove, WebAdminOnly, WebCatalogDB, WebCoreDB, get_web_catalog_code
 from ..context import build_nav_context
@@ -92,6 +93,7 @@ async def bulk_transfer_transactions(
     db: WebCatalogDB,
     core_db: WebCoreDB,
     catalog_code: Annotated[CatalogCode, Depends(get_web_catalog_code)],
+    _csrf: Annotated[None, Depends(require_csrf)],
     transaction_ids: list[str] = Form(...),
     new_business_date: date = Form(...),
     reason: str = Form(...),
@@ -121,6 +123,7 @@ async def transfer_cashier_transactions(
     db: WebCatalogDB,
     core_db: WebCoreDB,
     catalog_code: Annotated[CatalogCode, Depends(get_web_catalog_code)],
+    _csrf: Annotated[None, Depends(require_csrf)],
     cashier_user_id: uuid.UUID = Form(...),
     business_date: date = Form(...),
     new_business_date: date = Form(...),
@@ -178,6 +181,7 @@ async def transfer_transaction(
     current_user: WebAdminOnly,
     db: WebCatalogDB,
     catalog_code: Annotated[CatalogCode, Depends(get_web_catalog_code)],
+    _csrf: Annotated[None, Depends(require_csrf)],
     new_business_date: date = Form(...),
     reason: str = Form(...),
 ):
@@ -256,6 +260,7 @@ async def correct_transaction_submit(
     current_user: WebSupervisorOrAbove,
     db: WebCatalogDB,
     catalog_code: Annotated[CatalogCode, Depends(get_web_catalog_code)],
+    _csrf: Annotated[None, Depends(require_csrf)],
 ):
     service = TransactionService(db)
     txn = await service.get_transaction(transaction_id)
