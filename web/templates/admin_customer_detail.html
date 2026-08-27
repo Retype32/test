@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}{{ customer.customer_name }} — {{ settings.display_name }}{% endblock %}
+{% block page_title %}{{ customer.customer_name }}{% endblock %}
+{% block page_subtitle %}Administrator &#9656; Customers &#9656; {{ customer.customer_id }}{% endblock %}
+{% block header_actions %}
+<a class="btn btn-sm" href="/web/admin/customers">&#8592; Back to Customers</a>
+{% endblock %}
+{% block content %}
+
+<div class="card">
+    <div class="card-header">CREATE LOCATION</div>
+    <div class="card-body">
+        <form method="post" action="/web/admin/customers/{{ customer.customer_id }}/locations">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Location ID</label>
+                    <input type="text" name="location_id" required>
+                </div>
+                <div class="form-group">
+                    <label>Location Name</label>
+                    <input type="text" name="location_name" required>
+                </div>
+                <div class="form-group">
+                    <button class="btn btn-primary" type="submit">CREATE LOCATION</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">LOCATIONS ({{ customer.locations|length }})</div>
+    <div class="card-body" style="padding:0;">
+        <table class="data">
+            <thead><tr><th>Location ID</th><th>Name</th><th style="width:220px;"></th></tr></thead>
+            <tbody>
+            {% for l in customer.locations %}
+            <tr>
+                <td>{{ l.location_id }}</td>
+                <td>{{ l.location_name }}</td>
+                <td>
+                    <div class="btn-group">
+                        <button type="button" class="btn btn-sm" onclick="toggleEdit('{{ l.location_id }}')">Edit</button>
+                        <form method="post" action="/web/admin/customers/{{ customer.customer_id }}/locations/{{ l.location_id }}/delete"
+                              onsubmit="return confirm('Remove location {{ l.location_id }}? This cannot be undone.');">
+                            <button class="btn btn-sm btn-ghost" type="submit" style="color:var(--bad-fg);">Remove</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            <tr id="edit-row-{{ l.location_id }}" class="edit-row" hidden>
+                <td colspan="3">
+                    <form method="post" action="/web/admin/customers/{{ customer.customer_id }}/locations/{{ l.location_id }}/edit" class="form-row" style="margin:0;">
+                        <div class="form-group">
+                            <label>Location ID</label>
+                            <input type="text" name="new_location_id" value="{{ l.location_id }}" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Location Name</label>
+                            <input type="text" name="location_name" value="{{ l.location_name }}" required>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn btn-primary btn-sm" type="submit">Save</button>
+                            <button class="btn btn-sm btn-ghost" type="button" onclick="toggleEdit('{{ l.location_id }}')">Cancel</button>
+                        </div>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleEdit(locationId) {
+    var row = document.getElementById("edit-row-" + locationId);
+    if (row) row.hidden = !row.hidden;
+}
+</script>
+{% endblock %}

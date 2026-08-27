@@ -20,7 +20,7 @@ from .api.routes import auth, customers, transactions, catalogs, eod, notificati
 from web.routes import (
     auth_web, catalog_web, dashboard_web, transactions_web, reports_web,
     eod_web, notifications_web, duplicates_web, stats_web, admin_web,
-    transaction_entry_web,
+    transaction_entry_web, customers_web,
 )
 from web.templating import templates
 
@@ -112,6 +112,7 @@ app.include_router(notifications_web.router, prefix="/web")
 app.include_router(duplicates_web.router, prefix="/web")
 app.include_router(stats_web.router, prefix="/web")
 app.include_router(admin_web.router, prefix="/web")
+app.include_router(customers_web.router, prefix="/web")
 
 
 @app.exception_handler(StarletteHTTPException)
