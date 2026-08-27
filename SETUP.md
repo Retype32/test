@@ -39,15 +39,13 @@ DATABASE_URL_ESNF=sqlite+aiosqlite:///./catalog_esnf.db
 SECRET_KEY=brinks-nexus-super-secret-key-change-in-production-2026
 SESSION_COOKIE_SECURE=false
 
-COUNTER_MODE=mock
-COUNTER_PROFILE=bps_c1_eur
-COUNTER_COM_PORT=COM3
-COUNTER_STRICT=true
+COUNTER_COM_PORT=
+COUNTER_BAUD_RATE=115200
 ```
 
 **`SESSION_COOKIE_SECURE`** guards the web portal's login cookie — leave it `false` for local/LAN HTTP use, set it `true` once the portal is served over HTTPS.
 
-**`COUNTER_MODE`** selects the banknote counter driver: `mock` for development, `c1_report` for a real G+D BPS C1, or `none` to force manual entry. See [Connecting a BPS C1](#connecting-a-bps-c1) below.
+**`COUNTER_COM_PORT`** connects a real G+D BPS C1. Leave it blank to run without hardware — the wizard's machine-read step simply fails immediately with a clear message and cashiers enter counts manually. See [Connecting a BPS C1](#connecting-a-bps-c1) below.
 
 ---
 
@@ -97,7 +95,15 @@ After logging in, you'll be asked to pick a **Processing Catalog** (VMS / Brink'
 The G+D BPS C1 has no host command API. It drives a serial receipt printer, and
 integration works by connecting the PC to that printer port and parsing the
 batch report the machine prints. Nexus never sends the machine a command — it
-only listens. This is the same approach the ISA device plugin uses.
+only listens. This is the same approach the ISA device plugin uses, and the
+same approach the standalone `C1 Check.py` capture/evidence tool at the
+project root proved against a real machine — `hardware/c1_engine.py` carries
+that exact connection and parsing logic into the app itself.
+
+There is deliberately one supported layout: EUR denominations printed as bare
+face values (`50 X 10 = 500.00`, etc.), 115200 8N1 no handshake. Adding another
+currency or machine means editing `hardware/c1_engine.py`, not swapping a
+config file.
 
 **1. Configure the machine.** On the C1's operator panel, route report/printer
 output to a serial interface at **115200 8N1, no handshake** (the settings ISA
@@ -122,7 +128,7 @@ supports it:
 Either way, confirm Windows sees a port:
 
 ```bash
-python -m hardware.capture --list-ports
+python "C1 Check.py" --list-ports
 ```
 
 This identifies USB-attached ports and names the bridge chip. If nothing
@@ -131,58 +137,37 @@ virtual COM port — check Device Manager for an unrecognised device under
 "Other devices", which means a vendor USB driver is missing. Stop and fix this
 before going further; every later step depends on it.
 
-**3. Run the preflight.** This checks the profile, the parser, the port, and
-then listens for a real batch — it tells you exactly which step is failing:
+**3. Run the checker as a preflight.** `C1 Check.py` is the same read-only
+tool that proved this connection against a real machine, and it is the
+sanctioned way to verify a new site before switching Nexus on — it listens on
+the port, frames and parses whatever the C1 prints, and writes the evidence to
+`c1_nexus_data/` (raw bytes, cleaned text, parsed JSON) so a failure is
+diagnosable instead of a guess:
 
 ```bash
-python -m hardware.capture --doctor --port COM3
+python "C1 Check.py" --port COM3
 ```
 
-Run a batch on the machine during its listen window. If it finishes with
-"Ready to switch COUNTER_MODE=c1_report", you are done — skip to step 5.
+Run a batch on the machine during its listen window and watch the printed
+report summary. If it comes back `READY` with the expected denominations and
+total, the site is good — skip to step 4. If it comes back `INCOMPLETE`,
+the summary names exactly which check failed and `c1_nexus_data/incomplete/`
+holds the evidence to look at.
 
-**4. If the preflight couldn't parse what arrived,** capture the raw output so
-the profile can be corrected:
-
-```bash
-python -m hardware.capture --port COM3 --baud 115200
-```
-
-Run a small test batch on the machine and end it so it prints. Everything
-received is written to `reports/captures/`. Press Ctrl+C to stop.
-
-Then check that capture against the shipped profile:
-
-```bash
-python -m hardware.capture --parse reports/captures/c1-<timestamp>.txt
-```
-
-If denomination lines aren't recognised, edit `hardware/profiles/bps_c1_eur.json`
-so the `device` names and `labels` match what the machine prints. Matching is
-already tolerant of spacing and spelling — `EUR 50`, `EUR50`, `€50`, `50 EUR`,
-`EUR 50.00` and bare `50` all resolve to the same denomination — so usually only
-the section labels need changing. Add extra spellings to a denomination's
-`aliases` list if needed. The profile is data, not code: it can be corrected on
-site without a rebuild. Add the capture to `tests/test_c1_report_parser.py` as a
-regression test once it parses cleanly.
-
-**5. Switch the driver on** in `.env`:
+**4. Switch the driver on** in `.env`:
 
 ```env
-COUNTER_MODE=c1_report
 COUNTER_COM_PORT=COM3
-COUNTER_PROFILE=bps_c1_eur
-COUNTER_STRICT=true
+COUNTER_BAUD_RATE=115200
 ```
 
-`COUNTER_STRICT=true` rejects any report whose printed totals disagree with the
-sum of its own denomination lines. Leave it on in production — a partially read
-report is the main failure mode of printer-port integration, and silently
-accepting one would book a short count as a real one.
-
-**Adding another currency or machine:** copy an existing profile in
-`hardware/profiles/`, adjust the denominations and labels, and point
-`COUNTER_PROFILE` at it. No code changes are needed.
+Validation is always strict — a report whose printed totals disagree with the
+sum of its own denomination lines is always rejected, not accepted with a
+warning. A partially read report is the main failure mode of printer-port
+integration, and silently accepting one would book a short count as a real
+one. Nexus also refuses to book the exact same physical report twice (a
+receipt reprint, a retried request, a repeated poll landing on the same
+batch) — repeats are rejected as duplicates rather than double-counted.
 
 ### The C1's USB port
 
@@ -192,49 +177,19 @@ driver, which is a rebadged **libusb-win32**: `mausb.sys` identifies itself as
 exports the standard libusb-0.1 API. `MAUSB.inf` binds it to `USB\VID_10c4&PID_ea63`
 under class `USB`, not class `Ports` — so no COM port appears and neither the
 serial driver here nor ISA's plugin (which is `System.IO.Ports` only) can use it.
-
-The transport is nevertheless open: libusb-0.1 is a public API, and pyusb can
-drive G+D's own DLL directly. `hardware/usb_probe.py` does exactly that:
-
-```bash
-python -m hardware.usb_probe --list           # is the device attached?
-python -m hardware.usb_probe --descriptors    # endpoints and interfaces
-python -m hardware.usb_probe --read           # dump traffic from an IN endpoint
-```
-
-What is *not* known is the application protocol on the bulk endpoints. The
-probe reports whether the captured bytes are mostly printable: if they are, it
-is very likely the same report the printer port emits and
-`hardware/report_parser.py` handles it unchanged. The vendor ID (0x10C4,
-Silicon Labs, a USB-UART bridge maker) makes that plausible but unproven.
-
-Two practical constraints:
-
-- **Compass claims the interface exclusively.** Close it before probing, the
-  same conflict as ISA and the serial port.
-- **The supplied driver is unsigned.** The `.cat` files in the driver folder are
-  168-byte DDK placeholders reading "This file will contain the digital
-  signature…", and the driver dates from 2010. 64-bit Windows 10/11 will not
-  load an unsigned kernel driver with signature enforcement on. On a PC where
-  Compass already runs the driver is installed and working, so probe there
-  rather than weakening signature enforcement on a new machine.
+This path is not wired into Nexus; use the RS232/USB-CDC serial path above.
 
 ### Testing without a machine
 
-The simulator renders the batch report in six plausible print templates and
-parses them all, which exercises the entire stack with no hardware attached:
-
-```bash
-python -m hardware.simulate --check
-```
-
-To drive the real driver end to end, install a virtual null-modem pair
-(com0com on Windows), point the simulator at one end and `COUNTER_COM_PORT` at
-the other. Nexus then behaves exactly as it will with a real C1:
-
-```bash
-python -m hardware.simulate --port COM5 --repeat 3
-```
+Leave `COUNTER_COM_PORT` blank and the wizard's machine-read step fails
+immediately with a clear message — cashiers enter counts manually, which
+always works regardless of hardware. `tests/test_c1_engine.py` and
+`tests/test_c1_counter_driver.py` exercise the parsing and framing logic
+directly with no port involved. To drive the real driver end to end without a
+physical machine, install a virtual null-modem pair (com0com on Windows),
+point `COUNTER_COM_PORT` at one end, and replay a captured report (see
+`c1_nexus_data/raw/` after a real capture, or the sample report in
+`tests/test_c1_engine.py`) into the other.
 
 ### Running on a PC that already has ISA
 
@@ -245,48 +200,10 @@ plugin loads and holds it until the plugin unloads. Nexus will fail at
 
 ISA is browser-based, so there is no window to close. The browser is only its
 user interface; the component holding the port is an ISA service or background
-process on the PC the machine is cabled to. To see what is running:
-
-```bash
-python -m hardware.capture --port-status
-```
-
-This reports which ports are free or in use and lists non-Microsoft services
-and programs whose names suggest they belong to ISA or Compass. Treat the
-results as candidates to discuss with whoever administers ISA — **stopping an
-ISA service can take counting offline for other users**, which is why the
-options below that leave ISA untouched are usually preferable.
-
-The upside is that such a PC is already fully configured: the C1 is provably
-printing its report to serial, at known line settings, or ISA could not read it
-either. And the port conflict does not have to be resolved at all:
-
-**Preferred: `COUNTER_MODE=isa_log` — read ISA's own log instead of the port.**
-ISA's device plugin logs everything it reads from the machine (its Common
-library writes `DEVICE_LOG.LOG` in a configured log directory). At the `Info`
-logging level — the shipped default in the plugin config — every batch produces
-`Product Code = <isacode> , Quantity = <n> ... sent to ISA.` entries, and those
-ISA codes map directly onto the denominations in our device profiles. A log
-file can be read by any number of programs while ISA writes it, so Nexus tails
-it and books the same counts ISA books: no port conflict, no cabling, nothing
-about ISA touched or stopped.
-
-```env
-COUNTER_MODE=isa_log
-ISA_LOG_DIR=C:\path\to\isa\device\logs
-```
-
-Find the directory by locating `DEVICE_LOG.LOG` on the ISA PC (ask the ISA
-administrator, or search the ISA installation folder). The driver only reads
-batches counted after Nexus connects — old log content is never re-booked.
-Two dependencies to be aware of: counts flow only while ISA is running, and
-only while its plugin `logging level` stays at `Info` or lower.
-
-If ISA is not running, or Nexus is on its own machine, the direct options:
+process on the PC the machine is cabled to.
 
 | Option | Both keep working? | Effort |
 |---|---|---|
-| `isa_log` (above) | Yes | find the log folder |
 | Close ISA while using Nexus | No — one at a time | admin sign-off |
 | Second report output on another C1 interface, if the firmware allows one | Yes | machine config |
 | Passive Y-cable tap on the C1's transmit line | Yes | a cable |
@@ -323,14 +240,11 @@ BrinksNexus/
 │   └── static/css/theme.css — Portal color palette/stylesheet
 ├── reports/
 │   └── report_engine.py    — Excel + CSV export engine
-├── hardware/                — Banknote counter drivers, invoked from
+├── hardware/                — G+D BPS C1 serial connection, invoked from
 │   │                           web/routes/transaction_entry_web.py
-│   ├── gd_c1_report.py      — G+D BPS C1 serial report driver
-│   ├── report_parser.py     — Parses a machine's printed batch report into counts
-│   ├── report_profile.py    — Device profile loader
-│   ├── profiles/            — Per-machine report layouts (JSON, editable on site)
-│   ├── capture.py           — Raw serial capture / offline replay tool
-│   └── mock.py              — Development mock, no hardware required
+│   ├── __init__.py          — C1Counter driver + process-wide shared connection
+│   └── c1_engine.py         — ESC/P cleanup, report parsing/validation, stream framing, duplicate detection
+├── C1 Check.py              — Standalone read-only capture/preflight tool (see "Connecting a BPS C1")
 ├── run_backend.py           — Backend + web portal server launcher
 ├── start.bat                — Windows launcher (starts the backend, prints the portal URL)
 ├── requirements.txt

@@ -1194,7 +1194,7 @@ def create_env_from_example(nexus_info: NexusInfo, log):
 # Configuration copy tool (between Nexus versions)
 # --------------------------------------------------------------------------
 
-COPY_CANDIDATE_NAMES = [".env", "hardware/profiles", "config", "certs", "certificates"]
+COPY_CANDIDATE_NAMES = [".env", "config", "certs", "certificates"]
 NEVER_COPY_NAMES = {".venv", "__pycache__", ".pytest_cache"}
 NEVER_COPY_SUFFIXES = {".pyc"}
 
