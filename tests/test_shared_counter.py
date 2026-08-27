@@ -100,6 +100,37 @@ def test_a_construction_time_error_degrades_gracefully_instead_of_crashing(monke
     assert hardware._shared is None
 
 
+def test_the_shared_lock_is_not_held_during_the_blocking_wait(monkeypatch):
+    """Regression: the lock used to wrap the whole (up to 120s) read, so a
+    second wizard window queued behind the first instead of waiting on the
+    machine alongside it. Only connection setup belongs inside the lock."""
+    import threading
+
+    _reset_shared_state(monkeypatch)
+    release = threading.Event()
+
+    class BlockingCounter(FakeCounter):
+        def wait_for_count_result(self, timeout_seconds=120):
+            release.wait(timeout=5)
+            return hardware.CountResult(denominations={"€50": 1})
+
+    counter = BlockingCounter(connect_results=[True])
+    monkeypatch.setattr(hardware, "get_counter", lambda: counter)
+    hardware.open_shared_counter()
+
+    results = []
+    waiter = threading.Thread(target=lambda: results.append(hardware.wait_for_shared_count()))
+    waiter.start()
+    try:
+        # While that read is blocked, the lock must be free for anyone else.
+        assert hardware._shared_lock.acquire(timeout=2), "shared lock was held during the read"
+        hardware._shared_lock.release()
+    finally:
+        release.set()
+        waiter.join(timeout=5)
+    assert results and results[0].denominations == {"€50": 1}
+
+
 def test_a_dead_port_is_dropped_so_the_next_request_reconnects(monkeypatch):
     """If the physical port dies mid-use (cable pulled, USB re-enumerated),
     the stale connection must not be retried forever -- the next request

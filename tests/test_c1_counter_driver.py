@@ -1,7 +1,8 @@
 """
 Tests for the C1Counter serial driver (hardware/__init__.py), using a fake
-serial port. Only the physical port is faked -- everything else is the
-exact code path that runs against real hardware.
+serial port. Only the physical port is faked -- everything else, including
+the background reader thread, is the exact code path that runs against real
+hardware.
 """
 
 import threading
@@ -10,24 +11,35 @@ import time as _time
 import pytest
 
 from hardware import C1Counter
-from hardware.c1_engine import DuplicateReportError, ReportParseError
+from hardware.c1_engine import ReportParseError, SeenReports
 
 
 class FakeSerial:
     """Serial port that yields queued chunks, then silence.
 
-    Silence is what the driver uses to detect the end of a report, so the
-    fake must return b"" once drained rather than blocking.
+    Silence is what the driver uses to detect the end of an unterminated
+    report, so the fake must return b"" once drained rather than blocking.
+    Reads are guarded by a lock because the driver now reads from a
+    background thread while the test appends from the main one.
     """
 
     def __init__(self, chunks):
         self._chunks = list(chunks)
+        self._lock = threading.Lock()
         self.is_open = True
         self.written = bytearray()
         self.timeout = 0.05
 
     def read(self, _size):
-        return self._chunks.pop(0) if self._chunks else b""
+        with self._lock:
+            if self._chunks:
+                return self._chunks.pop(0)
+        _time.sleep(0.01)  # mimic a real port's read timeout
+        return b""
+
+    def feed(self, data):
+        with self._lock:
+            self._chunks.append(data)
 
     def write(self, data):
         self.written.extend(data)
@@ -46,20 +58,23 @@ _REPORT = (
     b"NO:1\r\nCurrency: EUR\r\n50 X 10 = 500.00\r\n20 X 5 = 100.00\r\n"
     b"Total 15 = 600.00\r\n\x1b\x69"
 )
+_REPORT_2 = b"NO:2\r\nCurrency: EUR\r\n10 X 4 = 40.00\r\nTotal 4 = 40.00\r\n\x1b\x69"
 
 
-def _counter(chunks, seen_path=None, tmp_path=None):
+def _counter(chunks, tmp_path):
+    """A driver wired to a fake port with its reader thread running."""
     counter = C1Counter()
+    counter._seen = SeenReports(tmp_path / "seen.json")
     counter._port = FakeSerial(chunks)
-    if seen_path is None:
-        from hardware.c1_engine import SeenReports
-        counter._seen = SeenReports((tmp_path or __import__("pathlib").Path("/tmp")) / "seen.json")
+    counter._start_reader()
     return counter
 
 
 @pytest.fixture
 def counter(tmp_path):
-    return _counter([_REPORT], tmp_path=tmp_path)
+    c = _counter([_REPORT], tmp_path)
+    yield c
+    c.disconnect()
 
 
 def test_reads_and_parses_a_complete_report(counter):
@@ -70,9 +85,11 @@ def test_reads_and_parses_a_complete_report(counter):
 def test_report_split_across_several_reads_is_reassembled(tmp_path):
     third = len(_REPORT) // 3
     chunks = [_REPORT[:third], _REPORT[third:2 * third], _REPORT[2 * third:]]
-    counter = _counter(chunks, tmp_path=tmp_path)
-    result = counter.wait_for_count_result(timeout_seconds=5)
-    assert result.denominations == {"€50": 10, "€20": 5}
+    c = _counter(chunks, tmp_path)
+    try:
+        assert c.wait_for_count_result(timeout_seconds=5).denominations == {"€50": 10, "€20": 5}
+    finally:
+        c.disconnect()
 
 
 def test_driver_never_writes_to_the_port(counter):
@@ -82,39 +99,98 @@ def test_driver_never_writes_to_the_port(counter):
 
 
 def test_silence_raises_timeout_rather_than_returning_zero_counts(tmp_path):
-    counter = _counter([], tmp_path=tmp_path)
-    with pytest.raises(TimeoutError):
-        counter.wait_for_count_result(timeout_seconds=1)
+    c = _counter([], tmp_path)
+    try:
+        with pytest.raises(TimeoutError):
+            c.wait_for_count_result(timeout_seconds=1)
+    finally:
+        c.disconnect()
 
 
-def test_unparseable_data_raises_and_includes_the_raw_text(tmp_path):
+def test_a_batch_printed_before_anyone_waits_is_not_lost(tmp_path):
+    """The whole point of listening continuously: the C1 prints when the
+    operator ends a batch, which is routinely *before* the cashier reaches
+    the Count Cash screen. That report must still be there when they do."""
+    c = _counter([_REPORT], tmp_path)
+    try:
+        _time.sleep(0.2)  # the report arrives and is framed with nobody waiting
+        result = c.wait_for_count_result(timeout_seconds=5)
+        assert result.denominations == {"€50": 10, "€20": 5}
+    finally:
+        c.disconnect()
+
+
+def test_several_batches_arriving_together_are_all_kept(tmp_path):
+    """Two reports in one burst must both be queued -- returning the first
+    and discarding the rest would silently lose a counted batch."""
+    c = _counter([_REPORT + _REPORT_2], tmp_path)
+    try:
+        first = c.wait_for_count_result(timeout_seconds=5)
+        second = c.wait_for_count_result(timeout_seconds=5)
+        assert first.denominations == {"€50": 10, "€20": 5}
+        assert second.denominations == {"€10": 4}
+    finally:
+        c.disconnect()
+
+
+def test_unparseable_data_surfaces_as_an_error(tmp_path):
     text = b"NO:1\r\nSELF TEST PASSED\r\nFirmware 3.11\r\n\x1b\x69"
-    counter = _counter([text], tmp_path=tmp_path)
-    with pytest.raises(ReportParseError) as exc:
-        counter.wait_for_count_result(timeout_seconds=5)
-    assert "SELF TEST PASSED" in str(exc.value)
+    c = _counter([text], tmp_path)
+    try:
+        with pytest.raises(ReportParseError) as exc:
+            c.wait_for_count_result(timeout_seconds=5)
+        assert "SELF TEST PASSED" in str(exc.value)
+    finally:
+        c.disconnect()
 
 
 def test_a_mismatched_report_is_always_rejected(tmp_path):
     """Strict validation is not configurable -- a report whose totals
     disagree with its own denomination lines is always rejected."""
     broken = b"NO:1\r\nCurrency: EUR\r\n50 X 10 = 500.00\r\nTotal 99 = 500.00\r\n\x1b\x69"
-    counter = _counter([broken], tmp_path=tmp_path)
-    with pytest.raises(ReportParseError, match="consistency"):
-        counter.wait_for_count_result(timeout_seconds=5)
+    c = _counter([broken], tmp_path)
+    try:
+        with pytest.raises(ReportParseError, match="consistency"):
+            c.wait_for_count_result(timeout_seconds=5)
+    finally:
+        c.disconnect()
 
 
-def test_a_repeated_report_is_rejected_as_a_duplicate(tmp_path):
-    """The same physical report read twice (reprint, retried request, a
-    second poll landing on the same batch) must not be booked twice."""
-    counter = _counter([_REPORT, _REPORT], tmp_path=tmp_path)
-    counter.wait_for_count_result(timeout_seconds=5)
-    with pytest.raises(DuplicateReportError):
-        counter.wait_for_count_result(timeout_seconds=5)
+def test_a_repeated_report_is_dropped_quietly_not_counted_twice(tmp_path):
+    """The same physical report arriving twice (a receipt reprint, the
+    machine repeating itself) must not be booked twice -- and must not
+    interrupt the cashier with an error either, since the listener is
+    running continuously and a repeat is not their problem to fix."""
+    c = _counter([_REPORT, _REPORT], tmp_path)
+    try:
+        assert c.wait_for_count_result(timeout_seconds=5).denominations == {"€50": 10, "€20": 5}
+        # The repeat is skipped, so the next wait finds nothing at all.
+        with pytest.raises(TimeoutError):
+            c.wait_for_count_result(timeout_seconds=1)
+    finally:
+        c.disconnect()
 
 
-def test_busy_port_error_names_isa_as_the_likely_owner(monkeypatch):
-    """The common on-site failure: ISA already owns the machine's port."""
+def test_a_dead_port_surfaces_the_real_error_to_a_waiting_request(tmp_path):
+    import serial
+
+    class DyingSerial(FakeSerial):
+        def read(self, _size):
+            raise serial.SerialException("device disappeared")
+
+    c = C1Counter()
+    c._seen = SeenReports(tmp_path / "seen.json")
+    c._port = DyingSerial([])
+    c._start_reader()
+    try:
+        with pytest.raises(serial.SerialException):
+            c.wait_for_count_result(timeout_seconds=5)
+    finally:
+        c.disconnect()
+
+
+def test_busy_port_error_names_the_likely_owners(monkeypatch):
+    """The common on-site failure: C1 Check.py or ISA already owns the port."""
     import serial
 
     def refuse(*_a, **_kw):
@@ -128,6 +204,7 @@ def test_busy_port_error_names_isa_as_the_likely_owner(monkeypatch):
 
     message = str(exc.value)
     assert "ISA" in message
+    assert "C1 Check.py" in message
     assert "already in use" in message
 
 
@@ -144,52 +221,39 @@ def test_missing_port_error_points_at_the_checker(monkeypatch):
 
 def test_end_marker_ends_the_report_without_waiting_out_the_idle_timeout(tmp_path):
     """ESC i should short-circuit the wait; the idle timeout is only a fallback."""
-    counter = _counter([_REPORT], tmp_path=tmp_path)
-    started = _time.monotonic()
-    result = counter.wait_for_count_result(timeout_seconds=10)
-    elapsed = _time.monotonic() - started
-
-    assert result.denominations == {"€50": 10, "€20": 5}
-    assert elapsed < 1.0
+    c = _counter([_REPORT], tmp_path)
+    try:
+        started = _time.monotonic()
+        result = c.wait_for_count_result(timeout_seconds=10)
+        elapsed = _time.monotonic() - started
+        assert result.denominations == {"€50": 10, "€20": 5}
+        assert elapsed < 1.0
+    finally:
+        c.disconnect()
 
 
 def test_coin_amount_is_merged_into_denominations_as_coins(tmp_path):
     text = b"NO:1\r\nCurrency: EUR\r\n50 X 10 = 500.00\r\nCoin 5.00\r\nTotal 10 = 505.00\r\n\x1b\x69"
-    counter = _counter([text], tmp_path=tmp_path)
-    result = counter.wait_for_count_result(timeout_seconds=5)
-    assert result.denominations["€50"] == 10
-    assert result.denominations["Coins"] == 5
+    c = _counter([text], tmp_path)
+    try:
+        result = c.wait_for_count_result(timeout_seconds=5)
+        assert result.denominations["€50"] == 10
+        assert result.denominations["Coins"] == 5
+    finally:
+        c.disconnect()
 
 
-def test_trailing_bytes_after_one_report_do_not_leak_into_the_next_read(tmp_path):
-    """Bytes still queued after a report's own end marker (e.g. a trailing
-    cut command) must not prefix the *next* wait_for_count_result() call and
-    corrupt its totals."""
-
-    class FlushingFakeSerial(FakeSerial):
-        def reset_input_buffer(self):
-            self._chunks.clear()
-
-    report1 = _REPORT
-    trailing_noise = b"50 X 1 = 50.00\r\n"
-    report2 = b"NO:2\r\nCurrency: EUR\r\n10 X 4 = 40.00\r\nTotal 4 = 40.00\r\n\x1b\x69"
-
-    counter = _counter([], tmp_path=tmp_path)
-    counter._port = FlushingFakeSerial([])
-
-    def deliver(data, delay):
-        _time.sleep(delay)
-        counter._port._chunks.append(data)
-
-    threading.Thread(target=deliver, args=(report1, 0.02)).start()
-    result1 = counter.wait_for_count_result(timeout_seconds=5)
-    assert result1.denominations == {"€50": 10, "€20": 5}
-
-    counter._port._chunks.append(trailing_noise)
-    threading.Thread(target=deliver, args=(report2, 0.05)).start()
-
-    result2 = counter.wait_for_count_result(timeout_seconds=5)
-    assert result2.denominations == {"€10": 4}
+def test_a_later_report_is_picked_up_on_the_same_connection(tmp_path):
+    """Consecutive batches on one connection must each come back intact,
+    with nothing from the first leaking into the second."""
+    c = _counter([], tmp_path)
+    try:
+        c._port.feed(_REPORT)
+        assert c.wait_for_count_result(timeout_seconds=5).denominations == {"€50": 10, "€20": 5}
+        c._port.feed(_REPORT_2)
+        assert c.wait_for_count_result(timeout_seconds=5).denominations == {"€10": 4}
+    finally:
+        c.disconnect()
 
 
 def test_denomination_keys_match_the_web_form_fields(counter):

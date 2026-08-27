@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import re
 from decimal import Decimal, InvalidOperation
 from typing import Annotated
@@ -13,6 +14,8 @@ from ..deps import WebCurrentUser, WebCatalogDB, get_web_catalog_code
 from ..context import build_nav_context
 
 router = APIRouter(tags=["web-transaction-entry"])
+
+logger = logging.getLogger(__name__)
 
 # Server-side session key holding the transaction currently being built across
 # the wizard's four popup screens. Each screen only ever adds to this dict, so
@@ -447,6 +450,18 @@ def _read_counter_sync() -> dict:
 async def read_counter(current_user: WebCurrentUser):
     try:
         denominations = await asyncio.to_thread(_read_counter_sync)
+    except TimeoutError as exc:
+        # Nothing was printed during the listen window. Routine while a
+        # cashier is between batches -- the page just keeps listening -- so
+        # this is logged quietly rather than as a fault.
+        logger.debug("Counter read timed out: %s", exc)
+        return JSONResponse({"error": str(exc)})
     except Exception as exc:
+        # Everything else is a real hardware fault (port lost, port owned by
+        # another program, a report that failed its own validation). These
+        # used to reach the cashier's browser and nowhere else, so a machine
+        # misbehaving during a live count left no trace on the server at all
+        # -- in a cash-handling system that is exactly the trail you need.
+        logger.exception("Counter read failed for user %s.", current_user.username)
         return JSONResponse({"error": str(exc)})
     return JSONResponse({"denominations": denominations})
