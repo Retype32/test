@@ -16,7 +16,14 @@ class StatsRepository:
     ) -> list[dict]:
         """One row per (user, business_date): slip count, cash volume, and the
         first/last transaction timestamp that day (used to derive an active-hours
-        span for the slips/hour metric)."""
+        span for the slips/hour metric).
+
+        Corrected-away originals are excluded. A correction leaves the original
+        row in place with is_superseded=True and adds a replacement, so counting
+        both would credit the processor with two slips for one bag and add the
+        pre-correction amount to their cash volume on top of the corrected one --
+        a correction would *raise* the recorded volume instead of restating it.
+        """
         query = (
             select(
                 Transaction.user_id,
@@ -27,7 +34,8 @@ class StatsRepository:
                 func.min(Transaction.created_at).label("first_txn_at"),
                 func.max(Transaction.created_at).label("last_txn_at"),
             )
-            .where(Transaction.business_date >= date_from, Transaction.business_date <= date_to)
+            .where(Transaction.business_date >= date_from, Transaction.business_date <= date_to,
+                   Transaction.is_superseded.is_not(True))
             .group_by(Transaction.user_id, Transaction.username, Transaction.business_date)
         )
         if user_id:

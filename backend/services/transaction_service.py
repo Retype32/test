@@ -108,6 +108,7 @@ class TransactionService:
         business_date: Optional[date] = None,
         limit: int = 500,
         offset: int = 0,
+        include_superseded: bool = False,
     ) -> list[Transaction]:
         return await self.repo.list_filtered(
             date_from=date_from,
@@ -118,6 +119,7 @@ class TransactionService:
             business_date=business_date,
             limit=limit,
             offset=offset,
+            include_superseded=include_superseded,
         )
 
     async def transfer_business_date(

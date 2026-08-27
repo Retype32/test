@@ -133,7 +133,18 @@ class TransactionRepository:
         business_date: Optional[date] = None,
         limit: int = 500,
         offset: int = 0,
+        include_superseded: bool = False,
     ) -> list[Transaction]:
+        """List transactions, excluding corrected-away originals by default.
+
+        Corrections are append-only: correcting a bag leaves the original row
+        in place with is_superseded=True and adds a new row carrying the
+        corrected value. Both rows are real history, but only one of them is
+        the live figure for that bag -- so anything that sums money (reports,
+        exports, the viewer's totals) must see only the survivor, or a single
+        correction inflates the total by the whole pre-correction amount.
+        Callers that genuinely want the audit trail pass include_superseded.
+        """
         query = (
             select(Transaction)
             .options(
@@ -151,6 +162,10 @@ class TransactionRepository:
         )
 
         conditions = []
+        if not include_superseded:
+            # is_superseded is nullable on rows written before the correction
+            # feature existed, so test "not true" rather than "== False".
+            conditions.append(Transaction.is_superseded.is_not(True))
         if date_from:
             conditions.append(Transaction.created_at >= date_from)
         if date_to:
