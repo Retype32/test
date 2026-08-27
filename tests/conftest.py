@@ -12,6 +12,38 @@ own module top level (they should only do so inside fixtures/tests).
 import os
 import tempfile
 
+import pytest
+
+
+def pytest_collection_modifyitems(items):
+    """Pin every async test to the session-scoped event loop.
+
+    pytest-asyncio 0.24 has no ini option for the default *test* loop scope
+    (only `asyncio_default_fixture_loop_scope`, which governs async
+    fixtures only) -- confirmed by reading pytest_asyncio/plugin.py's
+    `pytest_addoption`. Left at its default, `asyncio_mode = auto` marks
+    every `async def test_...` with a fresh function-scoped loop, while the
+    `app`/`tokens` fixtures below -- and with them `backend.core.database`'s
+    module-level engines and their connection pools -- are built once
+    against the session-scoped loop. Running the two together isn't just
+    noisy (see the `SAWarning`s this used to produce): a pooled aiosqlite
+    connection's background worker thread is a non-daemon `Thread` (aiosqlite
+    starts it that way, not this app's code) that blocks process exit if it
+    outlives the event loop it was signaling back to -- with enough test
+    files sharing the pool, that stops being a cosmetic warning and starts
+    hanging the whole test process at teardown. Marking every test
+    `loop_scope="session"` here (once, for the whole suite) makes every test
+    run on the same loop the fixtures were built against, closing the
+    mismatch at its source instead of chasing individual leaked connections.
+    """
+    import inspect
+
+    for item in items:
+        test_fn = getattr(item, "function", None)
+        if test_fn is not None and inspect.iscoroutinefunction(test_fn):
+            item.add_marker(pytest.mark.asyncio(loop_scope="session"))
+
+
 _TMP_DIR = tempfile.mkdtemp(prefix="brinksnexus_test_")
 
 os.environ["DATABASE_URL_CORE"] = f"sqlite+aiosqlite:///{_TMP_DIR}/core.db"
