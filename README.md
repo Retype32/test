@@ -6,7 +6,7 @@ A cash-processing management system for armored-carrier / cash-in-transit operat
 
 - **Multi-catalog data model** — customers, transactions, EOD closures, notifications, and duplicate flags are isolated per processing catalog (VMS / Brink's Dayshift / Brink's Complete / ESNF), while users live in one shared core database.
 - **Web portal** (FastAPI + Jinja2) — cashier transaction entry (with banknote-counter integration) plus supervisor/admin views for transactions, EOD, duplicate review, notifications, stats, reports, and user administration.
-- **Hardware integration** — banknote counter drivers invoked server-side from the transaction-entry page. The G+D BPS C1 is read by parsing the batch report it prints to its serial printer port, driven by an editable per-machine profile; a mock driver covers development without hardware.
+- **Hardware integration** — the G+D BPS C1 banknote counter is read server-side from the transaction-entry page by parsing the batch report it prints to its serial printer port (listen-only, built on the connection/parsing approach proven by the standalone `C1 Check.py` capture tool). Leave `COUNTER_COM_PORT` unset to develop or run without hardware — cashiers always have manual entry as a fallback.
 - **Reporting** — Excel/CSV report generation.
 - **Role-based access** — cashier / supervisor / administrator roles enforced consistently at the API and web-portal layers.
 - **Auditability** — core audit log plus duplicate-transaction detection and end-of-day closure tracking.
