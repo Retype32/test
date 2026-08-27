@@ -6,6 +6,7 @@ match (and get flagged as a duplicate of) something created there.
 """
 import uuid
 from datetime import date, timedelta
+from decimal import Decimal
 
 CATALOG = "complete"
 
@@ -14,17 +15,33 @@ def _headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}", "X-Catalog": CATALOG}
 
 
+def _denominate(total: str) -> list[dict]:
+    """Break a total into denomination lines that actually add up to it.
+
+    The service rejects a transaction whose stated total contradicts its own
+    denominations, so test payloads have to be internally consistent the way
+    a real count is.
+    """
+    remaining = Decimal(total)
+    lines = []
+    for label, face in (("€100", Decimal("100")), ("€50", Decimal("50")),
+                        ("€20", Decimal("20")), ("€10", Decimal("10")),
+                        ("€5", Decimal("5")), ("Coins", Decimal("1"))):
+        count = int(remaining // face)
+        if count:
+            lines.append({"denomination": label, "count": count,
+                          "value": str(face * count)})
+            remaining -= face * count
+    return lines
+
+
 def _payload(bag_number: str, total="170.00") -> dict:
     return {
         "customer_id": "C001",
         "location_id": "L001",
         "bag_number": bag_number,
         "total_value": total,
-        "denominations": [
-            {"denomination": "€100", "count": 1, "value": "100.00"},
-            {"denomination": "€50", "count": 1, "value": "50.00"},
-            {"denomination": "€20", "count": 1, "value": "20.00"},
-        ],
+        "denominations": _denominate(total),
     }
 
 

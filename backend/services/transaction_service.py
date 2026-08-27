@@ -46,7 +46,48 @@ class TransactionService:
             return BalanceStatus.pending
         return BalanceStatus.balanced if total_value == expected_total else BalanceStatus.not_balanced
 
+    @staticmethod
+    def validate_counted_cash(data: TransactionCreate) -> None:
+        """Reject a transaction whose stated total contradicts what it counted.
+
+        total_value, each denomination's value, and the counts arrive as
+        independent client-supplied numbers. The web wizard recomputes the
+        total server-side before it ever gets here, but the JSON API does
+        not -- so without this check any direct caller could book an
+        arbitrary cash total against a bag while listing denominations that
+        sum to something else entirely. In a cash-handling system the
+        counted notes are the source of truth, and anything claiming
+        otherwise is rejected rather than quietly stored.
+        """
+        expected_total = Decimal("0")
+        for entry in data.denominations:
+            face = DENOMINATION_VALUES.get(entry.denomination)
+            if face is None:
+                raise ValueError(
+                    f"Unknown denomination {entry.denomination!r}. Valid values: "
+                    + ", ".join(DENOMINATION_VALUES)
+                )
+            if entry.count < 0:
+                raise ValueError(
+                    f"{entry.denomination}: count cannot be negative (got {entry.count})"
+                )
+            line_total = face * entry.count
+            if entry.value != line_total:
+                raise ValueError(
+                    f"{entry.denomination}: {entry.count} x {face} is {line_total}, "
+                    f"but the line claims {entry.value}"
+                )
+            expected_total += line_total
+
+        if data.total_value != expected_total:
+            raise ValueError(
+                f"Total value {data.total_value} does not match the denominations "
+                f"counted, which add up to {expected_total}"
+            )
+
     async def create_transaction(self, user_id: uuid.UUID, username: str, data: TransactionCreate) -> Transaction:
+        self.validate_counted_cash(data)
+
         today = datetime.now().date()
         if await self.eod_service.is_day_closed(today):
             raise ValueError(f"Business day {today} is closed for this catalog")
@@ -203,6 +244,11 @@ class TransactionService:
         reason: str,
         supervisor_user_id: uuid.UUID,
     ) -> Transaction:
+        # A correction replaces a bag's recorded value, so it has to clear the
+        # same bar as the original count -- otherwise the one workflow meant to
+        # fix a wrong figure could introduce one.
+        self.validate_counted_cash(data)
+
         original = await self.repo.get_by_id(original_transaction_id)
         if not original:
             raise ValueError(f"Transaction {original_transaction_id} not found")
