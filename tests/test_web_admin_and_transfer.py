@@ -87,6 +87,64 @@ async def test_admin_eod_close_and_reopen_via_web(web_client):
     assert "REOPENED" in reopen.text
 
 
+async def test_admin_customer_and_location_management_via_web(web_client):
+    await web_client.post("/web/login", data={"username": "admin", "password": "admin"})
+    await web_client.post("/web/catalog/select", data={"code": "vms"})
+
+    customers_page = await web_client.get("/web/admin/customers")
+    assert customers_page.status_code == 200
+    assert "Customer Management" in customers_page.text
+
+    created = await web_client.post(
+        "/web/admin/customers",
+        data={"customer_id": "WEBTEST1", "customer_name": "Web Test Customer"},
+        follow_redirects=True,
+    )
+    assert "created" in created.text
+    assert "WEBTEST1" in created.text
+
+    renamed = await web_client.post(
+        "/web/admin/customers/WEBTEST1/edit",
+        data={"new_customer_id": "WEBTEST2", "customer_name": "Web Test Customer Renamed"},
+        follow_redirects=True,
+    )
+    assert "updated" in renamed.text
+    assert "WEBTEST2" in renamed.text
+    assert "Web Test Customer Renamed" in renamed.text
+
+    detail = await web_client.get("/web/admin/customers/WEBTEST2")
+    assert detail.status_code == 200
+    assert "Web Test Customer Renamed" in detail.text
+
+    loc_created = await web_client.post(
+        "/web/admin/customers/WEBTEST2/locations",
+        data={"location_id": "WEBTEST2-L1", "location_name": "Web Test Site"},
+        follow_redirects=True,
+    )
+    assert "created" in loc_created.text
+    assert "WEBTEST2-L1" in loc_created.text
+
+    loc_renamed = await web_client.post(
+        "/web/admin/customers/WEBTEST2/locations/WEBTEST2-L1/edit",
+        data={"new_location_id": "WEBTEST2-L2", "location_name": "Web Test Site Renamed"},
+        follow_redirects=True,
+    )
+    assert "updated" in loc_renamed.text
+    assert "WEBTEST2-L2" in loc_renamed.text
+
+    loc_removed = await web_client.post(
+        "/web/admin/customers/WEBTEST2/locations/WEBTEST2-L2/delete", follow_redirects=True
+    )
+    assert "removed" in loc_removed.text.lower()
+    locations_table = loc_removed.text[loc_removed.text.index("LOCATIONS ("):]
+    assert "WEBTEST2-L2" not in locations_table
+
+    removed = await web_client.post("/web/admin/customers/WEBTEST2/delete", follow_redirects=True)
+    assert "removed" in removed.text.lower()
+    customers_table = removed.text[removed.text.index("CUSTOMERS ("):]
+    assert "WEBTEST2" not in customers_table
+
+
 async def test_admin_transfers_transaction_via_web_form(web_client):
     await web_client.post("/web/login", data={"username": "admin", "password": "admin"})
     await web_client.post("/web/catalog/select", data={"code": "vms"})

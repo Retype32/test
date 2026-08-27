@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Customers — {{ settings.display_name }}{% endblock %}
+{% block page_title %}Customer Management{% endblock %}
+{% block page_subtitle %}Administrator &#9656; Customers{% endblock %}
+{% block content %}
+
+<div class="card">
+    <div class="card-header">CREATE CUSTOMER</div>
+    <div class="card-body">
+        <form method="post" action="/web/admin/customers">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Customer ID</label>
+                    <input type="text" name="customer_id" required>
+                </div>
+                <div class="form-group">
+                    <label>Customer Name</label>
+                    <input type="text" name="customer_name" required>
+                </div>
+                <div class="form-group">
+                    <button class="btn btn-primary" type="submit">CREATE CUSTOMER</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">CUSTOMERS ({{ customers|length }})</div>
+    <div class="card-body" style="padding:0;">
+        <table class="data">
+            <thead><tr><th>Customer ID</th><th>Name</th><th>Locations</th><th style="width:320px;"></th></tr></thead>
+            <tbody>
+            {% for c in customers %}
+            <tr>
+                <td>{{ c.customer_id }}</td>
+                <td>{{ c.customer_name }}</td>
+                <td>{{ c.locations|length }}</td>
+                <td>
+                    <div class="btn-group">
+                        <a class="btn btn-sm" href="/web/admin/customers/{{ c.customer_id }}">Locations</a>
+                        <button type="button" class="btn btn-sm" onclick="toggleEdit('{{ c.customer_id }}')">Edit</button>
+                        <form method="post" action="/web/admin/customers/{{ c.customer_id }}/delete"
+                              onsubmit="return confirm('Remove customer {{ c.customer_id }}? This cannot be undone.');">
+                            <button class="btn btn-sm btn-ghost" type="submit" style="color:var(--bad-fg);">Remove</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            <tr id="edit-row-{{ c.customer_id }}" class="edit-row" hidden>
+                <td colspan="4">
+                    <form method="post" action="/web/admin/customers/{{ c.customer_id }}/edit" class="form-row" style="margin:0;">
+                        <div class="form-group">
+                            <label>Customer ID</label>
+                            <input type="text" name="new_customer_id" value="{{ c.customer_id }}" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Customer Name</label>
+                            <input type="text" name="customer_name" value="{{ c.customer_name }}" required>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn btn-primary btn-sm" type="submit">Save</button>
+                            <button class="btn btn-sm btn-ghost" type="button" onclick="toggleEdit('{{ c.customer_id }}')">Cancel</button>
+                        </div>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleEdit(customerId) {
+    var row = document.getElementById("edit-row-" + customerId);
+    if (row) row.hidden = !row.hidden;
+}
+</script>
+{% endblock %}
